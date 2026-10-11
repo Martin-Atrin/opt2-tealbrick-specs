@@ -1,0 +1,985 @@
+// Portal route registry — opt2 (v0.1, Lead · Specs, 2026-10-11).
+// Source of truth for every Portal op (PORTAL-API.md is the index + rules).
+// Data and types only: no runtime code. Core builds its router, validators, rate limits and
+// audit hooks from ROUTES; Core serves ROUTES at GET /internal/routes; the GUI generates its ONE
+// gateway from that document (cached by digest); the owner CLI and the fake Portal (conformance)
+// are generated from it too. An op without a row here is unreachable (default deny).
+//
+// Shared vocabulary and ids are imported, never re-declared (CORE §0).
+
+import type { CompactJws, ConfigPullQuery, EnrolRequest, EnrolResponse, StatusReport } from "./bridge.ts";
+import type {
+  AgentId, BridgeId, ConnectionId, DeviceClientId, DeviceRequestId, DeviceScope, Ed25519PublicJwk,
+  FreeCaps, InstanceId, OwnerSessionClient, PersonId, WorkspaceId,
+} from "./credentials.ts";
+import type { AgentMode, Category, CrudAction, Effect, HoldFamily, KeySource, ProductId, SettingType } from "./manifest.ts";
+
+export type Crud = CrudAction;
+/** I14 shape `{write?, outward?, destructive?: {max, per}}` — owned by ./credentials.ts (FreeCaps). */
+export type Caps = FreeCaps;
+export type Jwk = Ed25519PublicJwk;
+export interface Jwks { keys: Ed25519PublicJwk[] }
+
+// ───────────────────────────── ids (CORE §1; the rest come from ./credentials.ts) ─────────────────────────────
+type Id<P extends string> = `${P}_${string}`;
+export type AccountId = Id<"acc">;
+export type ReleaseId = Id<"rel">;
+export type LicenceId = Id<"lic">;
+export type OfferId = Id<"off">;
+export type OrderId = Id<"ord">;
+export type EdgeId = Id<"edg">;
+export type DraftId = Id<"drf">;
+export type AuditEventId = Id<"aud">;
+export type ReceiptId = Id<"rcp">;
+/** CORE §1: owner native session (K3), provider link. */
+export type OwnerSessionId = Id<"osn">;
+export type ProviderLinkId = Id<"lnk">;
+export type IsoTime = string;
+export type Digest = `sha256:${string}`;
+/** Provider adapter id, data (e.g. "railway"); never branched on outside the adapter. */
+export type ProviderKey = string;
+
+// ───────────────────────────── route row ─────────────────────────────
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+/** Maps to CREDENTIALS kinds: browser=K1 Clerk session; owner-cli=K3 `tbo_`; bridge=K7 bridge
+ *  assertion; device=K2 device_code in body; public=no credential; stripe-webhook=Stripe signature. */
+export type AuthClass = "browser" | "owner-cli" | "bridge" | "device" | "public" | "stripe-webhook";
+/** gateway = forwarded by the generated GUI gateway at https://<portal>/api/v1/…; internal = Core
+ *  private network only (the gateway never forwards it). No third value: no row → no route. */
+export type Exposure = "gateway" | "internal";
+export type Transport = "json" | "json_slow" | "sse" | "longpoll" | "raw" | "binary";
+export type RateClass =
+  | "read" | "write" | "sensitive" | "public_strict" | "device_poll"
+  | "bridge_poll" | "bridge_write" | "webhook" | "stream" | "internal";
+/** none = request/response bodies never logged; meta = field names + byte sizes only. Values never. */
+export type BodyLog = "none" | "meta";
+
+export const REGISTRIES = {
+  product: { module: "products", record: "Product" },
+  release: { module: "releases", record: "Release" },
+  manifest: { module: "manifests", record: "StoredManifest" },
+  offer: { module: "offers", record: "Offer" },
+  entitlement: { module: "entitlements", record: "Licence" },
+  workspace: { module: "workspaces", record: "Workspace" },
+  agent: { module: "agents", record: "AgentCard" },
+  agent_policy: { module: "policy", record: "AgentPolicy" },
+  connection: { module: "connections", record: "AgentConnection" },
+  instance: { module: "instances", record: "Instance" },
+  provider: { module: "providers", record: "ProviderLink" },
+  credential: { module: "credentials", record: "CredentialRow" },
+  consent: { module: "consent", record: "ConsentRecord" },
+  route: { module: "routes", record: "RouteOp" },
+  audit: { module: "audit", record: "AuditEvent" },
+} as const;
+export type RegistryId = keyof typeof REGISTRIES;
+
+export const TRANSPORTS = {
+  json: { contentType: "application/json", bodyCapKb: 256, timeoutMs: 15_000 },
+  json_slow: { contentType: "application/json", bodyCapKb: 256, timeoutMs: 120_000 },
+  sse: { contentType: "text/event-stream", bodyCapKb: 0, timeoutMs: 900_000 },
+  longpoll: { contentType: "application/jose", bodyCapKb: 0, timeoutMs: 75_000 },
+  raw: { contentType: "application/json", bodyCapKb: 512, timeoutMs: 15_000 },
+  binary: { contentType: "application/zip", bodyCapKb: 0, timeoutMs: 60_000 },
+} as const satisfies Record<Transport, { contentType: string; bodyCapKb: number; timeoutMs: number }>;
+
+/** Limits per key per minute. Key: principal (account / cli session / bridge) or client IP. */
+export const RATE_CLASSES = {
+  read: { perMinute: 600, key: "principal" },
+  write: { perMinute: 120, key: "principal" },
+  sensitive: { perMinute: 10, key: "principal" },
+  public_strict: { perMinute: 20, key: "ip" },
+  device_poll: { perMinute: 30, key: "ip" },
+  bridge_poll: { perMinute: 6, key: "principal" },
+  bridge_write: { perMinute: 30, key: "principal" },
+  webhook: { perMinute: 300, key: "ip" },
+  stream: { perMinute: 20, key: "principal" },
+  internal: { perMinute: 0, key: "none" },
+} as const satisfies Record<RateClass, { perMinute: number; key: "principal" | "ip" | "none" }>;
+
+// ───────────────────────────── audit action registry ─────────────────────────────
+// Free-string actions are impossible: AuditEvent.action is this union. No behaviour reads audit rows.
+export const AUDIT_ACTIONS = [
+  "account.set_current_workspace",
+  "workspace.create", "workspace.update", "workspace.delete", "workspace.set_infrastructure",
+  "workspace.pause", "workspace.resume", "workspace.standalone",
+  "provider.link", "provider.link_token", "provider.unlink", "provider.destination_create",
+  "agent.create", "agent.update", "agent.delete", "agent.pairing_code_issue", "agent.pairing_approve",
+  "agent.policy_set", "agent.pause", "agent.resume",
+  "connection.create", "connection.revoke",
+  "device.approve", "device.deny", "device.redeem",
+  "canvas.save", "edge.create", "edge.update", "edge.delete", "hook.set",
+  "instance.deploy", "instance.retry", "instance.cancel", "instance.update", "instance.rollback",
+  "instance.remove", "instance.register_own_infra", "instance.registered", "bridge.deploy",
+  "bridge.enrolment_code_issue", "bridge.enrol",
+  "ticket.launch", "ticket.keys",
+  "licence.assign", "licence.unassign", "licence.move", "licence.create", "licence.revoke",
+  "order.create", "order.paid", "order.failed",
+  "skills.override_put", "skills.override_delete",
+  "owner_session.create", "owner_session.revoke",
+  "draft.create", "draft.update", "draft.submit", "draft.apply", "draft.apply_step",
+  "draft.reject", "draft.import",
+] as const;
+export type AuditAction = (typeof AUDIT_ACTIONS)[number];
+
+// ───────────────────────────── errors, paging ─────────────────────────────
+export type ErrorCode =
+  | "bad_request" | "validation_failed" | "unauthenticated" | "forbidden" | "not_found"
+  | "method_not_allowed" | "conflict" | "revision_conflict" | "idempotency_key_required"
+  | "idempotency_conflict" | "rate_limited" | "payload_too_large" | "licence_required"
+  | "licence_already_assigned" | "licence_not_active" | "workspace_paused" | "workspace_standalone"
+  | "workspace_not_empty" | "bridge_not_ready" | "provider_not_linked" | "provider_unavailable"
+  | "provider_reauth_required" | "destination_in_use" | "release_not_deployable"
+  | "manifest_invalid" | "deploy_in_progress" | "instance_exists" | "policy_invalid"
+  | "draft_invalid" | "draft_op_not_draftable" | "draft_ref_invalid" | "draft_ref_money"
+  | "draft_state" | "recipe_not_portable" | "authorization_pending" | "slow_down" | "access_denied"
+  | "expired_token" | "enrolment_code_invalid" | "bridge_key_revoked" | "stripe_signature_invalid"
+  | "offer_unavailable" | "checkout_failed" | "upstream_timeout" | "internal";
+/** CORE §8: the one error envelope. */
+export interface ErrorEnvelope { error: { code: ErrorCode; message: string; requestId: string; details?: Record<string, unknown> } }
+export interface PageQuery { cursor?: string; limit?: number }
+export interface Page<T> { items: T[]; nextCursor: string | null }
+
+// ───────────────────────────── shared shapes ─────────────────────────────
+export type Empty = Record<string, never>;
+export interface Ok { ok: true }
+export interface EnvVar { name: string; value: string }
+export interface WorkspaceRef { ws: WorkspaceId }
+export interface AgentRef { ws: WorkspaceId; agt: AgentId }
+export interface InstanceRef { ws: WorkspaceId; ins: InstanceId }
+export interface ProviderRef { provider: ProviderKey }
+export interface ConfigChange { id: string; configRevision: number }
+export type SettingValue = string | number | boolean;
+
+// account
+export interface AccountMe {
+  account: { id: AccountId; createdAt: IsoTime };
+  person: { id: PersonId; email: string; name: string | null; imageUrl: string | null };
+  /** true while the account has no workspace: GUI shows "new here, create workspace". */
+  firstSignIn: boolean;
+  currentWorkspaceId: WorkspaceId | null;
+  workspaceCount: number;
+}
+export interface SetCurrentWorkspaceInput { ws: WorkspaceId }
+
+// workspaces
+export type BridgeState = "absent" | "deploying" | "awaiting_enrolment" | "online" | "offline" | "standalone";
+export interface Workspace {
+  id: WorkspaceId;
+  name: string;
+  status: "active" | "paused" | "standalone";
+  channel: "stable" | "dev";
+  infrastructure: { provider: ProviderKey; destinationId: string; destinationName: string } | null;
+  bridge: { id: BridgeId | null; state: BridgeState };
+  /** Derived, never stored: drives the onboarding overlay. */
+  onboarding: { infrastructure: boolean; agent: boolean; agentAuthorised: boolean; app: boolean };
+  counts: { agents: number; instances: number };
+  createdAt: IsoTime;
+}
+export type WorkspaceListInput = PageQuery;
+export type WorkspaceList = Page<Workspace>;
+export interface WorkspaceCreateInput { name: string }
+export interface WorkspaceUpdateInput { ws: WorkspaceId; name?: string; channel?: "stable" | "dev" }
+export interface SetInfrastructureInput { ws: WorkspaceId; provider: ProviderKey; destinationId: string }
+export interface CostEstimateInput { ws: WorkspaceId; products: ProductId[] }
+export interface CostEstimate {
+  provider: ProviderKey;
+  currency: "USD";
+  monthlyLow: number;
+  monthlyHigh: number;
+  lines: { item: string; monthlyLow: number; monthlyHigh: number }[];
+  basis: string;
+  asOf: string;
+}
+/** ownerKey = public JWK printed by `tealbrick standalone owner-key` (CREDENTIALS §17). */
+export interface StandaloneInput { ws: WorkspaceId; confirmName: string; ownerKey: Ed25519PublicJwk }
+export interface StandaloneResult { ws: WorkspaceId; finalRevision: number; issuer: `tb:brg:${string}`; effectiveAt: IsoTime }
+
+// providers
+export interface ProviderOption {
+  id: ProviderKey;
+  label: string;
+  kind: "managed_cloud" | "self_hosted";
+  available: boolean;
+  unavailableReason: string | null;
+  linkMethods: ("oauth" | "token")[];
+}
+export interface ProviderList { items: ProviderOption[] }
+export interface LinkStart { authorizeUrl: string; signupUrl: string | null; state: string; expiresAt: IsoTime }
+export interface LinkCompleteInput { provider: ProviderKey; code: string; state: string }
+/** C3 fallback. The token is sealed in Core at once; bodyLog none; never returned. */
+export interface LinkTokenInput { provider: ProviderKey; token: string }
+export interface ProviderLink {
+  provider: ProviderKey;
+  linked: boolean;
+  id: ProviderLinkId | null;
+  method: "oauth" | "token" | null;
+  accountLabel: string | null;
+  status: "ok" | "reauth_required" | null;
+  verifiedAt: IsoTime | null;
+  workspacesUsing: number;
+}
+export interface Destination { id: string; name: string; createdByPortal: boolean; inUseBy: WorkspaceId | null }
+export interface DestinationList { items: Destination[] }
+export type DestinationCreateInput =
+  | { provider: ProviderKey; name: string; random?: never }
+  | { provider: ProviderKey; random: true; name?: never };
+
+// harness options (data rows, Agent Registry)
+export interface HarnessOption {
+  id: string;
+  kind: "desktop" | "agentic_system" | "other";
+  label: string;
+  /** Asset URL served from the release of the harness, or null. */
+  icon: string | null;
+  authorise: "device_approval" | "instruction_set" | "url";
+  /** true = the row is the "I do not have an agent" path (download the desktop app). */
+  noAgentPath: boolean;
+}
+export interface HarnessOptionList { items: HarnessOption[] }
+
+// agents
+export type AgentStatus = "pending" | "authorised" | "connected" | "paused";
+export interface AgentCard {
+  id: AgentId;
+  ws: WorkspaceId;
+  name: string;
+  purpose: string;
+  harnessOptionId: string;
+  /** Display only (N8); Portal never calls agents. */
+  endpointLabel: string | null;
+  mode: AgentMode;
+  status: AgentStatus;
+  paused: boolean;
+  connections: number;
+  createdBy: "owner" | "app";
+  createdAt: IsoTime;
+}
+export type AgentListInput = WorkspaceRef & PageQuery;
+export type AgentList = Page<AgentCard>;
+/** The ONE create path. Mode is always "free" for owner-created cards. */
+export interface AgentCreateInput { ws: WorkspaceId; name: string; purpose: string; harnessOptionId: string; endpointLabel?: string }
+export interface AgentUpdateInput { ws: WorkspaceId; agt: AgentId; name?: string; purpose?: string; harnessOptionId?: string; endpointLabel?: string | null }
+export interface AgentDeleteResult { agt: AgentId; revokedConnections: number; configRevision: number }
+export interface InstructionsInput { ws: WorkspaceId; agt: AgentId; harnessOptionId?: string }
+export interface InstructionSet {
+  harnessOptionId: string;
+  mcpUrl: string | null;
+  needsPairingCode: boolean;
+  /** `value` may contain the placeholder {{pairingCode}}; the GUI fills it from agents.pairing_code. */
+  steps: { title: string; detail: string; copy?: { kind: "command" | "json" | "url" | "text"; value: string } }[];
+}
+/** K2b, shown once; aud = this workspace's bridge. Only for OAuth connectors: path A (pairing.approve) and path B
+ *  (paste on the bridge authorize page). CLI and kits always use key connections (S9). */
+export interface PairingCode { code: string; expiresAt: IsoTime; mcpUrl: string }
+/** "Approve in Portal" (C4 connector path): `state` is the bridge-signed connect request (K7 key;
+ *  claims: OAuth request id, return URL on the bridge origin, bridge id, exp <= 10 min). */
+export interface ConnectRequestInput { state: string }
+/** Core returns it only if the bridge's workspace belongs to the caller's account (S3), else 404. */
+export interface ConnectRequest {
+  bridgeId: BridgeId;
+  ws: WorkspaceId;
+  /** Host of the OAuth client's redirect_uri, shown to the owner (S3). */
+  redirectHost: string;
+  /** DCR client_name as sent by the client; the GUI labels it "unverified" (S3). */
+  clientNameUnverified: string;
+  returnOrigin: string;
+  expiresAt: IsoTime;
+}
+/** Owner picks an agent card (a new card is made first with agents.create, the one create path). */
+export interface ConnectApproveInput { state: string; agt: AgentId }
+/** The GUI auto-submits this form (POST) to the bridge; it carries a freshly minted K2b. */
+export interface FormPostRedirect { action: string; method: "POST"; fields: Record<string, string> }
+export interface AgentPolicy {
+  agt: AgentId;
+  revision: number;
+  mode: AgentMode;
+  held: HoldFamily[];
+  caps: Caps;
+  /** Bound only: allowed operation ids per product (grant `wf`). */
+  workflow: { product: ProductId; operations: string[] }[];
+  paused: boolean;
+}
+export interface AgentPolicySetInput {
+  ws: WorkspaceId;
+  agt: AgentId;
+  revision: number;
+  mode: AgentMode;
+  held: HoldFamily[];
+  caps: Caps;
+  workflow?: { product: ProductId; operations: string[] }[];
+}
+export interface PauseState { id: string; paused: boolean; configRevision: number }
+
+// connections
+export interface AgentConnection {
+  id: ConnectionId;
+  agt: AgentId;
+  method: "key" | "pairing";
+  clientName: string;
+  publicKeyThumbprint: string | null;
+  createdAt: IsoTime;
+  lastSeenAt: IsoTime | null;
+}
+export interface ConnectionList { items: AgentConnection[] }
+export interface ConnectionRef { ws: WorkspaceId; agt: AgentId; con: ConnectionId }
+
+// device flow — this file is the ONE wire source (B6); CREDENTIALS §6 and CLI.md cite these type names.
+// RFC 8628 field names on start/token. No unbound list exists: the owner reaches a request only with its user code (B2).
+/** scope "owner" → K3 owner native session; only the owner's own tools (`tealbrick-cli`, `tbd`), never `kit`, never a key (B3). */
+export interface DeviceStartOwnerInput { scope: "owner"; client_id: "tealbrick-cli" | "tbd"; machine_label: string }
+/** scope "agent" → key connections; one request may carry 1..64 {agt?, public_key} pairs from one machine (S4). */
+export interface DeviceStartAgentInput {
+  scope: "agent";
+  client_id: "tealbrick-cli" | "tbd" | "kit";
+  machine_label: string;
+  /** harness option id */
+  harness: string;
+  agents: { agt?: AgentId; public_key: Jwk }[];
+}
+export type DeviceStartInput = DeviceStartOwnerInput | DeviceStartAgentInput;
+export interface DeviceStart {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete: string;
+  expires_in: number;
+  interval: number;
+}
+export interface DeviceTokenInput { grant_type: "urn:ietf:params:oauth:grant-type:device_code"; device_code: string; client_id: DeviceClientId }
+/** K3 owner native session (opaque `tbo_`); idle timeout 24 h (S1). */
+export interface DeviceOwnerTokenResult { scope: "owner"; access_token: string; token_type: "Bearer"; expires_in: number; session_id: OwnerSessionId }
+/** No token: each agent then signs a K4 assertion at the bridge `token_endpoint`. */
+export interface DeviceAgentTokenResult {
+  scope: "agent";
+  workspace_id: WorkspaceId;
+  mcp_url: string;
+  token_endpoint: string;
+  connections: { connection_id: ConnectionId; agent_id: AgentId; public_key_thumbprint: string }[];
+}
+export type DeviceToken = DeviceOwnerTokenResult | DeviceAgentTokenResult;
+/** user_code as typed or from verification_uri_complete; normalised + digest-matched; 5 wrong codes / 10 min per account. */
+export interface DeviceLookupInput { userCode: string }
+/** One request. The user code itself is never returned. */
+export interface DeviceRequest {
+  id: DeviceRequestId;
+  scope: DeviceScope;
+  clientId: DeviceClientId;
+  machineLabel: string;
+  harness: string | null;
+  agents: { index: number; agt: AgentId | null; publicKeyThumbprint: string }[];
+  state: "pending" | "approved" | "denied" | "expired" | "redeemed";
+  createdAt: IsoTime;
+  expiresAt: IsoTime;
+}
+/** scope agent: ws + one agent card per pair (by index; existing cards from agents.create). scope owner: neither. */
+export interface DeviceApproveInput { userCode: string; ws?: WorkspaceId; agents?: { index: number; agt: AgentId }[] }
+export interface DeviceDenyInput { userCode: string }
+export interface DeviceDecision {
+  id: DeviceRequestId;
+  state: "approved" | "denied";
+  connections: { connectionId: ConnectionId; agt: AgentId }[];
+  ownerSessionId: OwnerSessionId | null;
+}
+
+// catalog
+export type DeploymentView = "absent" | "deploying" | "running" | "failed" | "needs_keys" | "update_available";
+export interface SettingFieldView {
+  key: string;
+  type: SettingType;
+  label: string;
+  help: string | null;
+  required: boolean;
+  default: SettingValue | null;
+  choices: { value: string; label: string }[] | null;
+}
+/** Requirement only. A value field does not exist anywhere in this registry.
+ *  GUI label for source `account_default` = "workspace default keys" (N13: they live in each workspace's bridge). */
+export interface KeyRequirement {
+  name: string;
+  label: string;
+  provider: string;
+  required: boolean;
+  source: KeySource;
+  help: string | null;
+  step: string | null;
+}
+export interface DeployStep { id: string; title: string; help: string | null; fields: SettingFieldView[]; keys: KeyRequirement[] }
+export interface OfferSummary {
+  id: OfferId;
+  kind: "single" | "bundle";
+  name: string;
+  products: ProductId[];
+  major: number;
+  amount: number;
+  currency: string;
+  taxNote: string;
+}
+export interface ReleaseSummary { id: ReleaseId; version: string; channel: "stable" | "dev"; publishedAt: IsoTime }
+export interface CatalogEntry {
+  slug: ProductId;
+  name: string;
+  category: Category;
+  summary: string;
+  description: string | null;
+  icon: { svgPath: string; viewBox: string } | null;
+  intents: string[];
+  keywords: string[];
+  release: ReleaseSummary;
+  operations: { id: string; title: string; crud: Crud; effect: Effect }[];
+  offers: OfferSummary[];
+  deploySteps: DeployStep[];
+  keyRequirements: KeyRequirement[];
+  scopeTypes: { type: string; label: string; labelPlural: string }[];
+  hasConfigureUi: boolean;
+  configurePath: string | null;
+  skills: string[];
+  companions: { product: ProductId; purpose: string }[];
+  costEstimate: CostEstimate | null;
+  /** Present only when the request names a workspace. */
+  workspace?: {
+    licence: "none" | "unassigned_available" | "assigned";
+    licenceId: LicenceId | null;
+    deployment: DeploymentView;
+    instanceId: InstanceId | null;
+    releaseId: ReleaseId | null;
+    onCanvas: boolean;
+    /** Count only, from the bridge status report (S2): canvas badge; double-click opens the app's holds. */
+    pendingHolds: number | null;
+  };
+}
+export interface CatalogInput { ws?: WorkspaceId }
+export interface Catalog { digest: Digest; items: CatalogEntry[] }
+
+// releases + offers
+export interface Release {
+  id: ReleaseId;
+  product: ProductId;
+  kind: "app" | "bridge" | "desktop";
+  version: string;
+  channel: "stable" | "dev";
+  manifestDigest: Digest | null;
+  image: string | null;
+  artifact: { url: string; sha256: string } | null;
+  upgradeFrom: string;
+  publishedAt: IsoTime;
+}
+export interface ReleaseListInput { product: ProductId; channel?: "stable" | "dev" }
+export interface ReleaseList { items: Release[] }
+export interface Offer extends OfferSummary { livemode: boolean; verifiedAt: IsoTime }
+export interface OfferListInput { product?: ProductId }
+export interface OfferList { items: Offer[] }
+
+// canvas, edges, hooks
+export interface CanvasNode { kind: "agent" | "app"; ref: AgentId | ProductId; x: number; y: number }
+export interface Edge {
+  id: EdgeId;
+  kind: "agent_app" | "app_app";
+  from: { type: "agent"; id: AgentId } | { type: "app"; product: ProductId };
+  to: { product: ProductId };
+  crud: Crud[];
+  scopeType: string | null;
+  /** Display only (≤ 80 chars), reported by the app via the bridge ack. */
+  scopeSummary: string | null;
+  enabled: boolean;
+  origin: "owner" | "manifest";
+  grantState: "active" | "unlicensed" | "not_deployed" | "paused" | "disabled";
+}
+export interface Canvas { ws: WorkspaceId; revision: number; nodes: CanvasNode[]; edges: Edge[] }
+export interface CanvasSaveInput { ws: WorkspaceId; revision: number; nodes: CanvasNode[] }
+export interface EdgeCreateInput { ws: WorkspaceId; agt: AgentId; product: ProductId; crud: Crud[]; scopeType?: string }
+export interface EdgeUpdateInput { ws: WorkspaceId; edg: EdgeId; crud?: Crud[]; scopeType?: string | null; enabled?: boolean }
+export interface EdgeRef { ws: WorkspaceId; edg: EdgeId }
+export interface HookSubscription {
+  ins: InstanceId;
+  product: ProductId;
+  hookId: string;
+  title: string;
+  phase: "before" | "context" | "after";
+  order: number;
+  matchSummary: string;
+  enabled: boolean;
+  active: boolean;
+}
+export interface HookList { items: HookSubscription[] }
+export interface HookSetInput { ws: WorkspaceId; ins: InstanceId; hookId: string; enabled: boolean }
+
+// instances (deployment + registration in one record)
+export type DeployState = "queued" | "deploying" | "registering" | "running" | "failed" | "cancelled" | "removing" | "removed";
+export interface Instance {
+  id: InstanceId;
+  ws: WorkspaceId;
+  product: ProductId;
+  releaseId: ReleaseId;
+  version: string;
+  state: DeployState;
+  health: "ok" | "degraded" | "down" | "unknown";
+  healthAt: IsoTime | null;
+  registered: boolean;
+  missingKeys: string[];
+  /** Count only (S2). */
+  pendingHolds: number;
+  licensed: boolean;
+  updateAvailable: ReleaseSummary | null;
+  provider: ProviderKey | "own_infra";
+  settings: Record<string, SettingValue>;
+  lastError: { code: ErrorCode; message: string } | null;
+  createdAt: IsoTime;
+}
+export interface InstanceList { items: Instance[] }
+export interface DeployInput { ws: WorkspaceId; product: ProductId; releaseId?: ReleaseId; settings: Record<string, SettingValue> }
+export interface DeployResult { instance: Instance }
+/** B1: the bridge deploys when workspace infrastructure is set (onboarding step 1), not with the first app. */
+export interface BridgeDeployResult { bridge: BridgeStatus }
+/** S6: settings reach the app only as env at (re)deploy; a settings change redeploys. Never in the slice. */
+export interface InstanceUpdateInput { ws: WorkspaceId; ins: InstanceId; releaseId?: ReleaseId; settings?: Record<string, SettingValue> }
+export interface RollbackInput { ws: WorkspaceId; ins: InstanceId; releaseId?: ReleaseId }
+/** I15: deleteData defaults to false (services stopped, volumes and backups kept). */
+export interface RemoveInput { ws: WorkspaceId; ins: InstanceId; deleteData: boolean }
+export interface RemoveResult { id: InstanceId; state: "removing" | "removed"; dataDeleted: boolean }
+/** `register` = instance claim via the bridge, or bridge enrolment for bridge.deploy. */
+export type DeployPhase = "provision" | "image" | "start" | "register" | "health" | "ready";
+/** SSE `data:` payloads; event name = `type`. Heartbeat comment every 15 s; resumable with Last-Event-ID. */
+export type DeployProgressEvent =
+  | { type: "phase"; phase: DeployPhase; status: "started" | "done" | "failed"; message: string; elapsedMs: number }
+  | { type: "log"; lines: { ts: IsoTime; source: "build" | "deploy"; message: string }[] }
+  | { type: "done"; state: DeployState }
+  | { type: "error"; error: { code: ErrorCode; message: string } };
+export interface OwnInfraRegisterInput { ws: WorkspaceId; product: ProductId; releaseId?: ReleaseId }
+/** K6 for one neighbour instance; code shown once; env has only public values + the code. */
+export interface EnrolmentCode { code: string; expiresAt: IsoTime; instanceId: InstanceId | null; replacesBridge: BridgeId | null; env: EnvVar[] }
+
+// bridge (owner view)
+export interface BridgeStatus {
+  id: BridgeId | null;
+  state: BridgeState;
+  version: string | null;
+  mcpUrl: string | null;
+  lastSeenAt: IsoTime | null;
+  ackedRevision: number | null;
+  currentRevision: number;
+}
+
+// keys + tickets (no key value anywhere)
+export interface KeyStatus {
+  bridgeReady: boolean;
+  reportedAt: IsoTime | null;
+  items: { name: string; label: string; required: boolean; source: KeySource; set: boolean | null; usedBy: ProductId[] }[];
+}
+export interface KeyTicketInput { ws: WorkspaceId; names?: string[]; returnTo?: string }
+export interface LaunchTicketInput { ws: WorkspaceId; product: ProductId; path?: string }
+/** url = bridge origin + one-time K11 ticket (form POST target). */
+export interface TicketResult { url: string; ticket: string; expiresAt: IsoTime }
+
+// licences + commerce
+export interface Licence {
+  id: LicenceId;
+  product: ProductId;
+  major: number;
+  status: "active" | "refunded" | "disputed" | "review";
+  offerId: OfferId;
+  orderId: OrderId;
+  fromBundle: boolean;
+  assignment: { ws: WorkspaceId; workspaceName: string; assignedAt: IsoTime } | null;
+  livemode: boolean;
+  createdAt: IsoTime;
+}
+export type LicenceListInput = PageQuery & { product?: ProductId; assigned?: boolean };
+export type LicenceList = Page<Licence>;
+export interface LicenceRef { lic: LicenceId }
+export interface LicenceTargetInput { lic: LicenceId; ws: WorkspaceId }
+export interface LicenceChange { licence: Licence; configRevisions: { ws: WorkspaceId; revision: number }[] }
+export interface CheckoutInput { offerId: OfferId; ws?: WorkspaceId; returnPath: string }
+export interface Checkout { orderId: OrderId; url: string; expiresAt: IsoTime }
+export interface OrderRef { ord: OrderId }
+export interface Order {
+  id: OrderId;
+  offerId: OfferId;
+  state: "open" | "paid" | "failed" | "expired" | "refunded";
+  amountSubtotal: number;
+  amountTax: number | null;
+  amountTotal: number | null;
+  currency: string;
+  licenceIds: LicenceId[];
+  assignTo: WorkspaceId | null;
+  createdAt: IsoTime;
+  paidAt: IsoTime | null;
+}
+export interface UnpaidCount { ws: WorkspaceId; count: number; products: ProductId[] }
+/** Raw Stripe event body; verified with the sealed webhook secret before parsing. */
+export interface StripeEvent { id: string; type: string; livemode: boolean; data: { object: Record<string, unknown> } }
+export interface WebhookAck { received: true }
+
+// skills
+export interface SkillsInput { ws: WorkspaceId; agt?: AgentId }
+export interface SkillFile {
+  key: string;
+  path: string;
+  title: string;
+  when: string | null;
+  body: string;
+  sourceProduct: ProductId;
+  edited: boolean;
+  generatedDigest: Digest;
+}
+export interface SkillBundle { ws: WorkspaceId; digest: Digest; files: SkillFile[] }
+export interface SkillOverrideInput { ws: WorkspaceId; skillKey: string; body: string; baseDigest: Digest }
+export interface SkillKeyRef { ws: WorkspaceId; skillKey: string }
+/** application/zip of the rendered bundle (agent variables filled when `agt` is given). */
+export interface ZipFile { contentType: "application/zip"; filename: string }
+
+// downloads
+export interface DesktopDownload { releaseId: ReleaseId; version: string; url: string; sha256: string; notarized: boolean; minOs: string; publishedAt: IsoTime }
+
+// owner native sessions (K3: owner CLI and TBD human sign-in)
+export interface OwnerSession { id: OwnerSessionId; client: OwnerSessionClient; machineLabel: string; createdAt: IsoTime; lastUsedAt: IsoTime | null; idleExpiresAt: IsoTime; expiresAt: IsoTime; current: boolean }
+export interface OwnerSessionList { items: OwnerSession[] }
+export interface OwnerSessionRef { osn: OwnerSessionId }
+
+// drafts + recipes (Consent Registry)
+/** Any string value in a step input may be replaced by a ref to an earlier step output (CORE §13). */
+export interface DraftRef { $ref: `#/steps/${number}/output${string}` }
+export interface DraftStep { opId: DraftableOpId; input: Record<string, unknown> }
+export type DraftState = "open" | "submitted" | "applying" | "applied" | "failed" | "rejected";
+export interface DraftStepView {
+  n: number;
+  opId: DraftableOpId;
+  input: Record<string, unknown>;
+  summary: string;
+  effect: "write" | "destructive" | "money";
+  confirm: boolean;
+  status: "pending" | "ok" | "failed" | "skipped" | "handed_off";
+}
+export interface ApplyResult {
+  state: "applied" | "failed";
+  steps: { n: number; opId: DraftableOpId; status: "ok" | "failed" | "skipped" | "handed_off"; output?: unknown; error?: { code: ErrorCode; message: string } }[];
+  checkout: { orderIds: OrderId[]; url: string } | null;
+  receiptId: ReceiptId;
+}
+export interface Draft {
+  id: DraftId;
+  ws: WorkspaceId | null;
+  title: string;
+  revision: number;
+  state: DraftState;
+  createdBy: { kind: "owner_session"; id: OwnerSessionId; label: string } | { kind: "browser" } | { kind: "recipe"; title: string };
+  steps: DraftStepView[];
+  confirmCount: number;
+  requiresPurchase: boolean;
+  result: ApplyResult | null;
+  createdAt: IsoTime;
+  updatedAt: IsoTime;
+}
+export interface DraftSummary {
+  id: DraftId;
+  ws: WorkspaceId | null;
+  title: string;
+  state: DraftState;
+  createdByLabel: string;
+  stepCount: number;
+  requiresPurchase: boolean;
+  createdAt: IsoTime;
+}
+export type DraftListInput = PageQuery & { ws?: WorkspaceId; state?: DraftState };
+export type DraftList = Page<DraftSummary>;
+export interface DraftCreateInput { ws?: WorkspaceId; title: string; steps: DraftStep[] }
+export interface DraftRefInput { drf: DraftId }
+export interface DraftUpdateInput { drf: DraftId; revision: number; title?: string; steps?: DraftStep[] }
+export interface DraftSubmitResult { id: DraftId; state: "submitted"; reviewUrl: string }
+/** I18: validation against the route table and current state; nothing is applied. */
+export interface DraftValidation {
+  valid: boolean;
+  revision: number;
+  issues: { n: number | null; code: ErrorCode; message: string; pointer: string | null }[];
+}
+export interface DraftApplyInput { drf: DraftId; revision: number; confirm: true }
+export interface DraftRejectInput { drf: DraftId; reason?: string }
+/** Exported recipe: steps without workspace-bound ids (`ws` stripped; other ids must be $refs). */
+export interface Recipe { format: "tealbrick.recipe/1"; title: string; description: string | null; steps: DraftStep[] }
+export interface RecipeImportInput { ws?: WorkspaceId; recipe: Recipe }
+
+// audit
+export type AuditListInput = PageQuery & { ws?: WorkspaceId; action?: AuditAction };
+export interface AuditEvent {
+  id: AuditEventId;
+  at: IsoTime;
+  actor: { kind: "person" | "owner_session" | "bridge" | "stripe" | "system"; id: string };
+  action: AuditAction;
+  ws: WorkspaceId | null;
+  subject: string | null;
+  draftId: DraftId | null;
+  outcome: "ok" | "failed";
+  requestId: string;
+}
+export type AuditList = Page<AuditEvent>;
+
+// bridge-facing: payload documents are owned by BRIDGE.md and imported from ./bridge.ts
+/** Request body of bridge_api.enrol. */
+export type BridgeEnrolInput = EnrolRequest;
+export type BridgeEnrolResult = EnrolResponse;
+export type BridgeConfigInput = ConfigPullQuery;
+/** 200 `application/jose`: the config JWS itself (`tb-config+jws`, slices inside `apps[].slice`); 304 after `wait`. */
+export type BridgeConfig = CompactJws;
+export type BridgeAckInput = StatusReport;
+/** Connections and claims Core recorded come back in the next config (BRIDGE §5.6). */
+export interface BridgeAckResult { accepted: true; configRevision: number }
+
+// internal
+export interface RouteRegistryDoc { digest: Digest; routes: readonly RouteOp[] }
+export interface Health { ok: boolean; version: string; db: "ok" | "down" }
+
+// ───────────────────────────── schema name map ─────────────────────────────
+// input/output columns name a key of this map, so a typo fails typecheck.
+export interface SchemaMap {
+  Empty: Empty; Ok: Ok; WorkspaceRef: WorkspaceRef; AgentRef: AgentRef; InstanceRef: InstanceRef;
+  ProviderRef: ProviderRef; ConfigChange: ConfigChange;
+  AccountMe: AccountMe; SetCurrentWorkspaceInput: SetCurrentWorkspaceInput;
+  Workspace: Workspace; WorkspaceListInput: WorkspaceListInput; WorkspaceList: WorkspaceList;
+  WorkspaceCreateInput: WorkspaceCreateInput; WorkspaceUpdateInput: WorkspaceUpdateInput;
+  SetInfrastructureInput: SetInfrastructureInput; CostEstimateInput: CostEstimateInput; CostEstimate: CostEstimate;
+  StandaloneInput: StandaloneInput; StandaloneResult: StandaloneResult; PauseState: PauseState;
+  ProviderList: ProviderList; LinkStart: LinkStart; LinkCompleteInput: LinkCompleteInput; LinkTokenInput: LinkTokenInput;
+  ProviderLink: ProviderLink; DestinationList: DestinationList; DestinationCreateInput: DestinationCreateInput; Destination: Destination;
+  HarnessOptionList: HarnessOptionList;
+  AgentCard: AgentCard; AgentListInput: AgentListInput; AgentList: AgentList; AgentCreateInput: AgentCreateInput;
+  AgentUpdateInput: AgentUpdateInput; AgentDeleteResult: AgentDeleteResult; InstructionsInput: InstructionsInput;
+  InstructionSet: InstructionSet; PairingCode: PairingCode; ConnectRequestInput: ConnectRequestInput;
+  ConnectRequest: ConnectRequest; ConnectApproveInput: ConnectApproveInput; FormPostRedirect: FormPostRedirect; AgentPolicy: AgentPolicy; AgentPolicySetInput: AgentPolicySetInput;
+  ConnectionList: ConnectionList; ConnectionRef: ConnectionRef;
+  DeviceStartInput: DeviceStartInput; DeviceStart: DeviceStart; DeviceTokenInput: DeviceTokenInput; DeviceToken: DeviceToken;
+  DeviceLookupInput: DeviceLookupInput; DeviceRequest: DeviceRequest; DeviceApproveInput: DeviceApproveInput;
+  DeviceDenyInput: DeviceDenyInput; DeviceDecision: DeviceDecision;
+  CatalogInput: CatalogInput; Catalog: Catalog; ReleaseListInput: ReleaseListInput; ReleaseList: ReleaseList;
+  OfferListInput: OfferListInput; OfferList: OfferList;
+  Canvas: Canvas; CanvasSaveInput: CanvasSaveInput; Edge: Edge; EdgeCreateInput: EdgeCreateInput; EdgeUpdateInput: EdgeUpdateInput;
+  EdgeRef: EdgeRef; HookList: HookList; HookSetInput: HookSetInput; HookSubscription: HookSubscription;
+  Instance: Instance; InstanceList: InstanceList; DeployInput: DeployInput; DeployResult: DeployResult; BridgeDeployResult: BridgeDeployResult;
+  InstanceUpdateInput: InstanceUpdateInput; RollbackInput: RollbackInput; RemoveInput: RemoveInput; RemoveResult: RemoveResult;
+  DeployProgressEvent: DeployProgressEvent; OwnInfraRegisterInput: OwnInfraRegisterInput; EnrolmentCode: EnrolmentCode;
+  BridgeStatus: BridgeStatus; KeyStatus: KeyStatus; KeyTicketInput: KeyTicketInput; LaunchTicketInput: LaunchTicketInput;
+  TicketResult: TicketResult;
+  Licence: Licence; LicenceListInput: LicenceListInput; LicenceList: LicenceList; LicenceRef: LicenceRef;
+  LicenceTargetInput: LicenceTargetInput; LicenceChange: LicenceChange; CheckoutInput: CheckoutInput; Checkout: Checkout;
+  OrderRef: OrderRef; Order: Order; UnpaidCount: UnpaidCount; StripeEvent: StripeEvent; WebhookAck: WebhookAck;
+  SkillsInput: SkillsInput; SkillBundle: SkillBundle; SkillOverrideInput: SkillOverrideInput; SkillKeyRef: SkillKeyRef;
+  SkillFile: SkillFile; ZipFile: ZipFile; DesktopDownload: DesktopDownload;
+  OwnerSessionList: OwnerSessionList; OwnerSessionRef: OwnerSessionRef;
+  DraftCreateInput: DraftCreateInput; DraftRefInput: DraftRefInput; DraftUpdateInput: DraftUpdateInput; Draft: Draft;
+  DraftListInput: DraftListInput; DraftList: DraftList; DraftSubmitResult: DraftSubmitResult; DraftValidation: DraftValidation; DraftApplyInput: DraftApplyInput;
+  ApplyResult: ApplyResult; DraftRejectInput: DraftRejectInput; Recipe: Recipe; RecipeImportInput: RecipeImportInput;
+  AuditListInput: AuditListInput; AuditList: AuditList;
+  BridgeEnrolInput: BridgeEnrolInput; BridgeEnrolResult: BridgeEnrolResult; BridgeConfigInput: BridgeConfigInput;
+  BridgeConfig: BridgeConfig; BridgeAckInput: BridgeAckInput; BridgeAckResult: BridgeAckResult;
+  RouteRegistryDoc: RouteRegistryDoc; Health: Health;
+}
+export type SchemaName = keyof SchemaMap;
+
+export interface RouteOp {
+  opId: string;
+  method: HttpMethod;
+  /** Relative to /api/v1 for exposure "gateway"; absolute for "internal". `{name}` = input field. */
+  path: string;
+  auth: readonly AuthClass[];
+  exposure: Exposure;
+  transport: Transport;
+  /** Allowed query keys (GET only); the gateway drops any other key. */
+  query: readonly string[];
+  /** Flat input = path params + query (GET) or body (others). */
+  input: SchemaName;
+  output: SchemaName;
+  rate: RateClass;
+  bodyLog: BodyLog;
+  audit: AuditAction | null;
+  /** Owner CLI may put it in a draft (applied later in the browser). */
+  draftable: boolean;
+  /** Listed as a confirm item in draft review; covered by the one apply confirmation. */
+  confirm: boolean;
+  /** Idempotency-Key header required. */
+  idempotent: boolean;
+  registry: RegistryId;
+}
+
+// ───────────────────────────── the table ─────────────────────────────
+const B = ["browser"] as const;
+const BO = ["browser", "owner-cli"] as const;
+const NOQ = [] as const;
+const PAGE = ["cursor", "limit"] as const;
+
+export const ROUTES = [
+  // account
+  { opId: "account.me", method: "GET", path: "/me", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "AccountMe", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "account.set_current_workspace", method: "PUT", path: "/me/current-workspace", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "SetCurrentWorkspaceInput", output: "AccountMe", rate: "write", bodyLog: "meta", audit: "account.set_current_workspace", draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+
+  // workspaces
+  { opId: "workspaces.list", method: "GET", path: "/workspaces", auth: BO, exposure: "gateway", transport: "json", query: PAGE, input: "WorkspaceListInput", output: "WorkspaceList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "workspaces.create", method: "POST", path: "/workspaces", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceCreateInput", output: "Workspace", rate: "write", bodyLog: "meta", audit: "workspace.create", draftable: true, confirm: false, idempotent: true, registry: "workspace" },
+  { opId: "workspaces.get", method: "GET", path: "/workspaces/{ws}", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "Workspace", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "workspaces.update", method: "PATCH", path: "/workspaces/{ws}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceUpdateInput", output: "Workspace", rate: "write", bodyLog: "meta", audit: "workspace.update", draftable: true, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "workspaces.delete", method: "DELETE", path: "/workspaces/{ws}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "Ok", rate: "write", bodyLog: "meta", audit: "workspace.delete", draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "workspaces.set_infrastructure", method: "PUT", path: "/workspaces/{ws}/infrastructure", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "SetInfrastructureInput", output: "Workspace", rate: "write", bodyLog: "meta", audit: "workspace.set_infrastructure", draftable: true, confirm: true, idempotent: false, registry: "workspace" },
+  { opId: "workspaces.cost_estimate", method: "GET", path: "/workspaces/{ws}/cost-estimate", auth: BO, exposure: "gateway", transport: "json", query: ["products"], input: "CostEstimateInput", output: "CostEstimate", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "workspaces.pause", method: "POST", path: "/workspaces/{ws}/pause", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "PauseState", rate: "write", bodyLog: "meta", audit: "workspace.pause", draftable: false, confirm: false, idempotent: false, registry: "agent_policy" },
+  { opId: "workspaces.resume", method: "POST", path: "/workspaces/{ws}/resume", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "PauseState", rate: "write", bodyLog: "meta", audit: "workspace.resume", draftable: false, confirm: false, idempotent: false, registry: "agent_policy" },
+  { opId: "workspaces.standalone", method: "POST", path: "/workspaces/{ws}/standalone", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "StandaloneInput", output: "StandaloneResult", rate: "sensitive", bodyLog: "meta", audit: "workspace.standalone", draftable: false, confirm: false, idempotent: false, registry: "instance" },
+
+  // providers (Railway adapter; Coolify / own-infra rows available:false)
+  { opId: "providers.list", method: "GET", path: "/providers", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "ProviderList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "providers.link_start", method: "POST", path: "/providers/{provider}/link/start", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "ProviderRef", output: "LinkStart", rate: "sensitive", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "providers.link_complete", method: "POST", path: "/providers/{provider}/link/complete", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "LinkCompleteInput", output: "ProviderLink", rate: "sensitive", bodyLog: "none", audit: "provider.link", draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "providers.link_token", method: "POST", path: "/providers/{provider}/link/token", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "LinkTokenInput", output: "ProviderLink", rate: "sensitive", bodyLog: "none", audit: "provider.link_token", draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "providers.link_get", method: "GET", path: "/providers/{provider}/link", auth: BO, exposure: "gateway", transport: "json_slow", query: NOQ, input: "ProviderRef", output: "ProviderLink", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "providers.link_delete", method: "DELETE", path: "/providers/{provider}/link", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "ProviderRef", output: "ProviderLink", rate: "write", bodyLog: "meta", audit: "provider.unlink", draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "providers.destinations_list", method: "GET", path: "/providers/{provider}/destinations", auth: BO, exposure: "gateway", transport: "json_slow", query: NOQ, input: "ProviderRef", output: "DestinationList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "providers.destinations_create", method: "POST", path: "/providers/{provider}/destinations", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "DestinationCreateInput", output: "Destination", rate: "write", bodyLog: "meta", audit: "provider.destination_create", draftable: true, confirm: false, idempotent: true, registry: "provider" },
+
+  // harness options + agents
+  { opId: "harness.options", method: "GET", path: "/harness-options", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "HarnessOptionList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "agent" },
+  { opId: "agents.list", method: "GET", path: "/workspaces/{ws}/agents", auth: BO, exposure: "gateway", transport: "json", query: PAGE, input: "AgentListInput", output: "AgentList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "agent" },
+  { opId: "agents.create", method: "POST", path: "/workspaces/{ws}/agents", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "AgentCreateInput", output: "AgentCard", rate: "write", bodyLog: "meta", audit: "agent.create", draftable: true, confirm: true, idempotent: true, registry: "agent" },
+  { opId: "agents.get", method: "GET", path: "/workspaces/{ws}/agents/{agt}", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "AgentRef", output: "AgentCard", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "agent" },
+  { opId: "agents.update", method: "PATCH", path: "/workspaces/{ws}/agents/{agt}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "AgentUpdateInput", output: "AgentCard", rate: "write", bodyLog: "meta", audit: "agent.update", draftable: true, confirm: false, idempotent: false, registry: "agent" },
+  { opId: "agents.delete", method: "DELETE", path: "/workspaces/{ws}/agents/{agt}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "AgentRef", output: "AgentDeleteResult", rate: "write", bodyLog: "meta", audit: "agent.delete", draftable: true, confirm: true, idempotent: false, registry: "agent" },
+  { opId: "agents.instructions", method: "GET", path: "/workspaces/{ws}/agents/{agt}/instructions", auth: BO, exposure: "gateway", transport: "json", query: ["harnessOptionId"], input: "InstructionsInput", output: "InstructionSet", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "agent" },
+  { opId: "agents.pairing_code", method: "POST", path: "/workspaces/{ws}/agents/{agt}/pairing-codes", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "AgentRef", output: "PairingCode", rate: "sensitive", bodyLog: "none", audit: "agent.pairing_code_issue", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "pairing.connect_request", method: "GET", path: "/pairing/connect-request", auth: B, exposure: "gateway", transport: "json", query: ["state"], input: "ConnectRequestInput", output: "ConnectRequest", rate: "read", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "pairing.approve", method: "POST", path: "/pairing/approve", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "ConnectApproveInput", output: "FormPostRedirect", rate: "sensitive", bodyLog: "none", audit: "agent.pairing_approve", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "agents.policy_get", method: "GET", path: "/workspaces/{ws}/agents/{agt}/policy", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "AgentRef", output: "AgentPolicy", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "agent_policy" },
+  { opId: "agents.policy_set", method: "PUT", path: "/workspaces/{ws}/agents/{agt}/policy", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "AgentPolicySetInput", output: "AgentPolicy", rate: "write", bodyLog: "meta", audit: "agent.policy_set", draftable: true, confirm: true, idempotent: false, registry: "agent_policy" },
+  { opId: "agents.pause", method: "POST", path: "/workspaces/{ws}/agents/{agt}/pause", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "AgentRef", output: "PauseState", rate: "write", bodyLog: "meta", audit: "agent.pause", draftable: true, confirm: false, idempotent: false, registry: "agent_policy" },
+  { opId: "agents.resume", method: "POST", path: "/workspaces/{ws}/agents/{agt}/resume", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "AgentRef", output: "PauseState", rate: "write", bodyLog: "meta", audit: "agent.resume", draftable: true, confirm: true, idempotent: false, registry: "agent_policy" },
+
+  // connections
+  { opId: "connections.list", method: "GET", path: "/workspaces/{ws}/agents/{agt}/connections", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "AgentRef", output: "ConnectionList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "connection" },
+  { opId: "connections.revoke", method: "DELETE", path: "/workspaces/{ws}/agents/{agt}/connections/{con}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "ConnectionRef", output: "ConfigChange", rate: "write", bodyLog: "meta", audit: "connection.revoke", draftable: true, confirm: true, idempotent: false, registry: "connection" },
+
+  // device flow (owner CLI sign-in + key connections)
+  { opId: "device.start", method: "POST", path: "/device/authorize", auth: ["public"], exposure: "gateway", transport: "json", query: NOQ, input: "DeviceStartInput", output: "DeviceStart", rate: "public_strict", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "device.token", method: "POST", path: "/device/token", auth: ["device"], exposure: "gateway", transport: "json", query: NOQ, input: "DeviceTokenInput", output: "DeviceToken", rate: "device_poll", bodyLog: "none", audit: "device.redeem", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "device.lookup", method: "POST", path: "/device/lookup", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "DeviceLookupInput", output: "DeviceRequest", rate: "sensitive", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "device.approve", method: "POST", path: "/device/approve", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "DeviceApproveInput", output: "DeviceDecision", rate: "sensitive", bodyLog: "none", audit: "device.approve", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "device.deny", method: "POST", path: "/device/deny", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "DeviceDenyInput", output: "DeviceDecision", rate: "sensitive", bodyLog: "none", audit: "device.deny", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+
+  // catalog, releases, offers
+  { opId: "catalog.list", method: "GET", path: "/catalog", auth: BO, exposure: "gateway", transport: "json", query: ["ws"], input: "CatalogInput", output: "Catalog", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "product" },
+  { opId: "releases.list", method: "GET", path: "/products/{product}/releases", auth: BO, exposure: "gateway", transport: "json", query: ["channel"], input: "ReleaseListInput", output: "ReleaseList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "release" },
+  { opId: "offers.list", method: "GET", path: "/offers", auth: BO, exposure: "gateway", transport: "json", query: ["product"], input: "OfferListInput", output: "OfferList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "offer" },
+
+  // canvas, edges, hooks
+  { opId: "canvas.get", method: "GET", path: "/workspaces/{ws}/canvas", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "Canvas", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "canvas.save", method: "PUT", path: "/workspaces/{ws}/canvas", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "CanvasSaveInput", output: "Canvas", rate: "write", bodyLog: "meta", audit: "canvas.save", draftable: true, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "edges.create", method: "POST", path: "/workspaces/{ws}/edges", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "EdgeCreateInput", output: "Edge", rate: "write", bodyLog: "meta", audit: "edge.create", draftable: true, confirm: true, idempotent: true, registry: "workspace" },
+  { opId: "edges.update", method: "PATCH", path: "/workspaces/{ws}/edges/{edg}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "EdgeUpdateInput", output: "Edge", rate: "write", bodyLog: "meta", audit: "edge.update", draftable: true, confirm: true, idempotent: false, registry: "workspace" },
+  { opId: "edges.delete", method: "DELETE", path: "/workspaces/{ws}/edges/{edg}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "EdgeRef", output: "ConfigChange", rate: "write", bodyLog: "meta", audit: "edge.delete", draftable: true, confirm: true, idempotent: false, registry: "workspace" },
+  { opId: "hooks.list", method: "GET", path: "/workspaces/{ws}/hooks", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "HookList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "hooks.set", method: "PATCH", path: "/workspaces/{ws}/hooks/{ins}/{hookId}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "HookSetInput", output: "HookSubscription", rate: "write", bodyLog: "meta", audit: "hook.set", draftable: true, confirm: true, idempotent: false, registry: "workspace" },
+
+  // instances (deploy lifecycle) + bridge
+  { opId: "instances.list", method: "GET", path: "/workspaces/{ws}/instances", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "InstanceList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "instances.deploy", method: "POST", path: "/workspaces/{ws}/instances", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "DeployInput", output: "DeployResult", rate: "write", bodyLog: "meta", audit: "instance.deploy", draftable: true, confirm: true, idempotent: true, registry: "instance" },
+  { opId: "instances.get", method: "GET", path: "/workspaces/{ws}/instances/{ins}", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "InstanceRef", output: "Instance", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "instances.progress", method: "GET", path: "/workspaces/{ws}/instances/{ins}/progress", auth: BO, exposure: "gateway", transport: "sse", query: NOQ, input: "InstanceRef", output: "DeployProgressEvent", rate: "stream", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "instances.retry", method: "POST", path: "/workspaces/{ws}/instances/{ins}/retry", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "InstanceRef", output: "Instance", rate: "write", bodyLog: "meta", audit: "instance.retry", draftable: false, confirm: false, idempotent: true, registry: "instance" },
+  { opId: "instances.cancel", method: "POST", path: "/workspaces/{ws}/instances/{ins}/cancel", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "InstanceRef", output: "Instance", rate: "write", bodyLog: "meta", audit: "instance.cancel", draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "instances.update", method: "POST", path: "/workspaces/{ws}/instances/{ins}/update", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "InstanceUpdateInput", output: "Instance", rate: "write", bodyLog: "meta", audit: "instance.update", draftable: true, confirm: true, idempotent: true, registry: "instance" },
+  { opId: "instances.rollback", method: "POST", path: "/workspaces/{ws}/instances/{ins}/rollback", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "RollbackInput", output: "Instance", rate: "write", bodyLog: "meta", audit: "instance.rollback", draftable: true, confirm: true, idempotent: true, registry: "instance" },
+  { opId: "instances.remove", method: "POST", path: "/workspaces/{ws}/instances/{ins}/remove", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "RemoveInput", output: "RemoveResult", rate: "write", bodyLog: "meta", audit: "instance.remove", draftable: true, confirm: true, idempotent: false, registry: "instance" },
+  { opId: "instances.register_own_infra", method: "POST", path: "/workspaces/{ws}/instances/own-infra", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "OwnInfraRegisterInput", output: "EnrolmentCode", rate: "sensitive", bodyLog: "none", audit: "instance.register_own_infra", draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "bridge.get", method: "GET", path: "/workspaces/{ws}/bridge", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "BridgeStatus", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "bridge.deploy", method: "POST", path: "/workspaces/{ws}/bridge/deploy", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "WorkspaceRef", output: "BridgeDeployResult", rate: "write", bodyLog: "meta", audit: "bridge.deploy", draftable: true, confirm: true, idempotent: true, registry: "instance" },
+  { opId: "bridge.progress", method: "GET", path: "/workspaces/{ws}/bridge/progress", auth: BO, exposure: "gateway", transport: "sse", query: NOQ, input: "WorkspaceRef", output: "DeployProgressEvent", rate: "stream", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "bridge.enrolment_code", method: "POST", path: "/workspaces/{ws}/bridge/enrolment-code", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "EnrolmentCode", rate: "sensitive", bodyLog: "none", audit: "bridge.enrolment_code_issue", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+
+  // keys (presence only) + person tickets
+  { opId: "keys.status", method: "GET", path: "/workspaces/{ws}/keys", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "KeyStatus", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "tickets.keys", method: "POST", path: "/workspaces/{ws}/tickets/keys", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "KeyTicketInput", output: "TicketResult", rate: "sensitive", bodyLog: "none", audit: "ticket.keys", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "tickets.launch", method: "POST", path: "/workspaces/{ws}/tickets/launch", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "LaunchTicketInput", output: "TicketResult", rate: "sensitive", bodyLog: "none", audit: "ticket.launch", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+
+  // licences + commerce
+  { opId: "licences.list", method: "GET", path: "/licences", auth: BO, exposure: "gateway", transport: "json", query: ["cursor", "limit", "product", "assigned"], input: "LicenceListInput", output: "LicenceList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
+  { opId: "licences.assign", method: "POST", path: "/licences/{lic}/assign", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "LicenceTargetInput", output: "LicenceChange", rate: "write", bodyLog: "meta", audit: "licence.assign", draftable: true, confirm: true, idempotent: false, registry: "entitlement" },
+  { opId: "licences.unassign", method: "POST", path: "/licences/{lic}/unassign", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "LicenceRef", output: "LicenceChange", rate: "write", bodyLog: "meta", audit: "licence.unassign", draftable: true, confirm: true, idempotent: false, registry: "entitlement" },
+  { opId: "licences.move", method: "POST", path: "/licences/{lic}/move", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "LicenceTargetInput", output: "LicenceChange", rate: "write", bodyLog: "meta", audit: "licence.move", draftable: true, confirm: true, idempotent: false, registry: "entitlement" },
+  { opId: "licences.unpaid", method: "GET", path: "/workspaces/{ws}/unpaid", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "UnpaidCount", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
+  { opId: "checkout.create", method: "POST", path: "/checkout", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "CheckoutInput", output: "Checkout", rate: "sensitive", bodyLog: "meta", audit: "order.create", draftable: true, confirm: true, idempotent: true, registry: "entitlement" },
+  { opId: "checkout.get", method: "GET", path: "/orders/{ord}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "OrderRef", output: "Order", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
+  { opId: "stripe.webhook", method: "POST", path: "/stripe/webhook", auth: ["stripe-webhook"], exposure: "gateway", transport: "raw", query: NOQ, input: "StripeEvent", output: "WebhookAck", rate: "webhook", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
+
+  // skills
+  { opId: "skills.get", method: "GET", path: "/workspaces/{ws}/skills", auth: BO, exposure: "gateway", transport: "json", query: ["agt"], input: "SkillsInput", output: "SkillBundle", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "skills.override_put", method: "PUT", path: "/workspaces/{ws}/skills/overrides/{skillKey}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "SkillOverrideInput", output: "SkillFile", rate: "write", bodyLog: "meta", audit: "skills.override_put", draftable: true, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "skills.override_delete", method: "DELETE", path: "/workspaces/{ws}/skills/overrides/{skillKey}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "SkillKeyRef", output: "SkillFile", rate: "write", bodyLog: "meta", audit: "skills.override_delete", draftable: true, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "skills.pack", method: "GET", path: "/workspaces/{ws}/skills/pack", auth: BO, exposure: "gateway", transport: "binary", query: ["agt"], input: "SkillsInput", output: "ZipFile", rate: "read", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+
+  // downloads
+  { opId: "downloads.desktop", method: "GET", path: "/downloads/desktop", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "DesktopDownload", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "release" },
+
+  // owner native sessions (K3)
+  { opId: "owner_sessions.list", method: "GET", path: "/owner-sessions", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "OwnerSessionList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "owner_sessions.revoke", method: "DELETE", path: "/owner-sessions/{osn}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "OwnerSessionRef", output: "Ok", rate: "write", bodyLog: "meta", audit: "owner_session.revoke", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+  { opId: "owner_sessions.logout", method: "POST", path: "/owner-sessions/logout", auth: ["owner-cli"], exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "Ok", rate: "write", bodyLog: "meta", audit: "owner_session.revoke", draftable: false, confirm: false, idempotent: false, registry: "credential" },
+
+  // drafts + recipes (Consent Registry)
+  { opId: "drafts.list", method: "GET", path: "/drafts", auth: BO, exposure: "gateway", transport: "json", query: ["cursor", "limit", "ws", "state"], input: "DraftListInput", output: "DraftList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "consent" },
+  { opId: "drafts.create", method: "POST", path: "/drafts", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "DraftCreateInput", output: "Draft", rate: "write", bodyLog: "meta", audit: "draft.create", draftable: false, confirm: false, idempotent: true, registry: "consent" },
+  { opId: "drafts.get", method: "GET", path: "/drafts/{drf}", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "DraftRefInput", output: "Draft", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "consent" },
+  { opId: "drafts.update", method: "PUT", path: "/drafts/{drf}", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "DraftUpdateInput", output: "Draft", rate: "write", bodyLog: "meta", audit: "draft.update", draftable: false, confirm: false, idempotent: false, registry: "consent" },
+  { opId: "drafts.submit", method: "POST", path: "/drafts/{drf}/submit", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "DraftRefInput", output: "DraftSubmitResult", rate: "write", bodyLog: "meta", audit: "draft.submit", draftable: false, confirm: false, idempotent: false, registry: "consent" },
+  { opId: "drafts.validate", method: "POST", path: "/drafts/{drf}/validate", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "DraftRefInput", output: "DraftValidation", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "consent" },
+  { opId: "drafts.apply", method: "POST", path: "/drafts/{drf}/apply", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "DraftApplyInput", output: "ApplyResult", rate: "sensitive", bodyLog: "meta", audit: "draft.apply", draftable: false, confirm: true, idempotent: true, registry: "consent" },
+  { opId: "drafts.reject", method: "POST", path: "/drafts/{drf}/reject", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "DraftRejectInput", output: "Draft", rate: "write", bodyLog: "meta", audit: "draft.reject", draftable: false, confirm: false, idempotent: false, registry: "consent" },
+  { opId: "drafts.export", method: "GET", path: "/drafts/{drf}/recipe", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "DraftRefInput", output: "Recipe", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "consent" },
+  { opId: "drafts.import", method: "POST", path: "/recipes/import", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "RecipeImportInput", output: "Draft", rate: "write", bodyLog: "meta", audit: "draft.import", draftable: false, confirm: false, idempotent: true, registry: "consent" },
+
+  // audit
+  { opId: "audit.list", method: "GET", path: "/audit", auth: BO, exposure: "gateway", transport: "json", query: ["cursor", "limit", "ws", "action"], input: "AuditListInput", output: "AuditList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "audit" },
+
+  // bridge-facing (outbound-only from the customer side)
+  { opId: "bridge_api.enrol", method: "POST", path: "/bridge/enrol", auth: ["public"], exposure: "gateway", transport: "json", query: NOQ, input: "BridgeEnrolInput", output: "BridgeEnrolResult", rate: "public_strict", bodyLog: "none", audit: "bridge.enrol", draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "bridge_api.config", method: "GET", path: "/bridge/config", auth: ["bridge"], exposure: "gateway", transport: "longpoll", query: ["after", "wait"], input: "BridgeConfigInput", output: "BridgeConfig", rate: "bridge_poll", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
+  { opId: "bridge_api.ack", method: "POST", path: "/bridge/ack", auth: ["bridge"], exposure: "gateway", transport: "json", query: NOQ, input: "BridgeAckInput", output: "BridgeAckResult", rate: "bridge_write", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
+
+  // internal (private network only; the gateway never forwards these)
+  { opId: "routes.list", method: "GET", path: "/internal/routes", auth: ["public"], exposure: "internal", transport: "json", query: NOQ, input: "Empty", output: "RouteRegistryDoc", rate: "internal", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "route" },
+  { opId: "system.health", method: "GET", path: "/internal/health", auth: ["public"], exposure: "internal", transport: "json", query: NOQ, input: "Empty", output: "Health", rate: "internal", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "route" },
+] as const satisfies readonly RouteOp[];
+
+// ───────────────────────────── derived types + compile-time invariants ─────────────────────────────
+type Row = (typeof ROUTES)[number];
+export type OpId = Row["opId"];
+export type DraftableOpId = Extract<Row, { draftable: true }>["opId"];
+export type ConfirmOpId = Extract<Row, { confirm: true }>["opId"];
+type WithAuth<R, A extends AuthClass> = R extends { auth: readonly (infer X)[] } ? (A extends X ? R : never) : never;
+export type OwnerCliOpId = WithAuth<Row, "owner-cli">["opId"];
+export type PublicOpId = WithAuth<Row, "public">["opId"];
+
+type Check<T extends true> = T;
+type OwnerCliRow = WithAuth<Row, "owner-cli">;
+/** RT1: owner CLI may call only reads, drafts.*, and its own logout. */
+export type InvariantOwnerCli = Check<
+  [Exclude<OwnerCliRow, { method: "GET" } | { opId: `drafts.${string}` | "owner_sessions.logout" }>] extends [never] ? true : false
+>;
+/** RT2: draftable ops are browser-callable mutations (never GET, never public/bridge/device/webhook). */
+export type InvariantDraftable = Check<
+  [Exclude<Extract<Row, { draftable: true }>, { method: Exclude<HttpMethod, "GET">; auth: readonly ("browser" | "owner-cli")[] }>] extends [never] ? true : false
+>;
+/** RT3: confirm ops are never callable by the owner CLI directly. */
+export type InvariantConfirm = Check<[Extract<OwnerCliRow, { confirm: true }>] extends [never] ? true : false>;
+/** RT4: internal exposure only on /internal paths. */
+export type InvariantInternal = Check<
+  [Exclude<Extract<Row, { exposure: "internal" }>, { path: `/internal/${string}` }>] extends [never] ? true : false
+>;
+/** RT5: gateway rows never use /internal paths. */
+export type InvariantGatewayPaths = Check<[Extract<Row, { exposure: "gateway"; path: `/internal${string}` }>] extends [never] ? true : false>;
+/** RT6 (B8): rows whose responses must never be stored are never idempotent (the idempotency store keeps responses). */
+export type InvariantIdempotencyNoSecrets = Check<[Extract<Row, { idempotent: true; bodyLog: "none" }>] extends [never] ? true : false>;
+/** Output schemas that carry a one-time code, ticket or token. */
+export type SecretBearingSchema = "DeviceStart" | "DeviceToken" | "PairingCode" | "FormPostRedirect" | "EnrolmentCode" | "TicketResult";
+type SecretKey = "code" | "ticket" | "device_code" | "user_code" | "access_token" | "session_token";
+type TopKeys<T> = T extends unknown ? keyof T : never;
+/** RT7 (S1): no output reachable with K3 (owner CLI / TBD) carries a code, ticket or token — by name and by top-level field. */
+export type InvariantOwnerCliNoSecrets = Check<
+  [Extract<OwnerCliRow["output"], SecretBearingSchema> | Extract<TopKeys<SchemaMap[OwnerCliRow["output"]]>, SecretKey>] extends [never] ? true : false
+>;
+/** RT8 (S1): every secret-bearing output is idempotent: false and bodyLog: none. */
+export type InvariantSecretOutputs = Check<
+  [Exclude<Extract<Row, { output: SecretBearingSchema }>, { idempotent: false; bodyLog: "none" }>] extends [never] ? true : false
+>;

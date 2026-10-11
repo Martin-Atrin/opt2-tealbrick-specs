@@ -1,0 +1,498 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.opt2.tealbrick.com/manifest.schema.json",
+  "title": "Teal Brick miniapp manifest v2",
+  "description": "Structure of tealbrick.miniapp/2. Cross-field rules live in MANIFEST.md and are enforced by @opt2-tealbrick/manifest validateManifest(); schema and validator together are the contract.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "name", "summary", "version", "sdkMajor", "publisher", "source", "icon", "discovery", "runtime", "operations", "backups"],
+  "properties": {
+    "$schema": { "type": "string", "maxLength": 256 },
+    "schema": { "const": "tealbrick.miniapp/2" },
+    "id": { "$ref": "#/$defs/productId" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "description": { "type": "string", "maxLength": 4000 },
+    "version": { "$ref": "#/$defs/semver" },
+    "sdkMajor": { "type": "integer", "minimum": 1, "maximum": 999 },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "url": { "$ref": "#/$defs/httpsUrl" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repo", "license"],
+      "properties": {
+        "repo": { "$ref": "#/$defs/httpsUrl" },
+        "license": { "type": "string", "pattern": "^[A-Za-z0-9.+-]+( (AND|OR|WITH) [A-Za-z0-9.+-]+)*$", "maxLength": 128 }
+      }
+    },
+    "icon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["svgPath"],
+      "properties": {
+        "svgPath": { "type": "string", "minLength": 1, "maxLength": 8192, "pattern": "^[MmZzLlHhVvCcSsQqTtAa0-9eE.,+\\- ]+$" },
+        "viewBox": { "type": "string", "pattern": "^0 0 [1-9][0-9]{0,3} [1-9][0-9]{0,3}$", "default": "0 0 24 24" }
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category", "intents"],
+      "properties": {
+        "category": { "enum": ["memory", "connectivity", "communication", "automation", "governance", "operations", "productivity", "developer"] },
+        "intents": { "type": "array", "minItems": 1, "maxItems": 60, "uniqueItems": true, "items": { "type": "string", "minLength": 3, "maxLength": 80 } },
+        "keywords": { "type": "array", "maxItems": 30, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9 -]{0,31}$" } }
+      }
+    },
+    "runtime": { "$ref": "#/$defs/runtime" },
+    "operations": { "type": "array", "maxItems": 128, "items": { "$ref": "#/$defs/operation" } },
+    "scopes": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/scope" } },
+    "settings": { "$ref": "#/$defs/settings" },
+    "hooks": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/hook" } },
+    "companions": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/companion" } },
+    "needsAgentDirectory": { "type": "boolean", "default": false },
+    "skills": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/skill" } },
+    "harnessHints": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/harnessHint" } },
+    "unlocks": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/unlock" } },
+    "backups": { "$ref": "#/$defs/backups" },
+    "artifacts": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/artifact" } },
+    "publicRoutes": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/publicRoute" } },
+    "ui": { "$ref": "#/$defs/ui" }
+  },
+  "$defs": {
+    "productId": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" },
+    "snakeId": { "type": "string", "pattern": "^(?!tb_)[a-z][a-z0-9_]{1,39}$" },
+    "semver": { "type": "string", "maxLength": 64, "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$" },
+    "httpsUrl": { "type": "string", "maxLength": 512, "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?(/[^\\s?#@]*)?$" },
+    "relPath": { "type": "string", "maxLength": 256, "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]+$" },
+    "absPath": { "type": "string", "maxLength": 256, "pattern": "^/(?!.*\\.\\.)[A-Za-z0-9._/-]*$" },
+    "appPath": { "type": "string", "maxLength": 256, "pattern": "^/(?!tb(/|$))(?!.*\\.\\.)[A-Za-z0-9._~/-]*$" },
+    "envName": { "type": "string", "pattern": "^(?!TB_|RAILWAY_)[A-Z][A-Z0-9_]{1,63}$" },
+    "crudAction": { "enum": ["create", "read", "update", "delete"] },
+    "crudSet": { "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/crudAction" } },
+    "effect": { "enum": ["read", "write", "outward", "destructive", "money"] },
+    "holdFamily": { "enum": ["first_contact", "profile_change", "live_call", "destructive", "money"] },
+    "condition": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 4,
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]{1,39}$" },
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "#/$defs/conditionValue" },
+          { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/conditionValue" } }
+        ]
+      }
+    },
+    "conditionValue": { "type": ["string", "boolean", "integer"] },
+    "jsonSchemaObject": {
+      "type": "object",
+      "required": ["type"],
+      "properties": { "type": { "const": "object" } }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cpu", "memoryMb"],
+      "properties": {
+        "cpu": { "type": "number", "minimum": 0.1, "maximum": 32 },
+        "memoryMb": { "type": "integer", "minimum": 128, "maximum": 65536 }
+      }
+    },
+    "volume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "mountPath", "sizeGb", "purpose"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeId" },
+        "mountPath": { "$ref": "#/$defs/absPath" },
+        "sizeGb": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "purpose": { "enum": ["data", "backup"] }
+      }
+    },
+    "envEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "$ref": "#/$defs/envName" },
+        "value": { "type": "string", "maxLength": 512 },
+        "setting": { "$ref": "#/$defs/snakeId" },
+        "generate": { "const": "secret" }
+      },
+      "oneOf": [
+        { "required": ["value"] },
+        { "required": ["setting"] },
+        { "required": ["generate"] }
+      ]
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context", "dockerfile"],
+      "properties": {
+        "context": { "type": "string", "maxLength": 256, "pattern": "^(\\.|(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]+)$" },
+        "dockerfile": { "$ref": "#/$defs/relPath" }
+      }
+    },
+    "health": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": { "kind": { "const": "http" }, "path": { "$ref": "#/$defs/absPath" } }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": { "kind": { "const": "tcp" } }
+        }
+      ]
+    },
+    "argv": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "type": "string", "minLength": 1, "maxLength": 256 } },
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "port", "resources", "health", "startOrder"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(?!tb-)[a-z][a-z0-9-]{1,31}$" },
+        "title": { "type": "string", "maxLength": 60 },
+        "image": { "type": "string", "maxLength": 256, "pattern": "^[a-z0-9][a-z0-9._/:-]*@sha256:[a-f0-9]{64}$" },
+        "build": { "$ref": "#/$defs/build" },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "resources": { "$ref": "#/$defs/resources" },
+        "volumes": { "type": "array", "maxItems": 4, "items": { "$ref": "#/$defs/volume" } },
+        "health": { "$ref": "#/$defs/health" },
+        "env": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/envEntry" } },
+        "when": { "$ref": "#/$defs/condition" },
+        "startOrder": { "type": "integer", "minimum": 0, "maximum": 99 },
+        "backup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["dump", "restore", "extension"],
+          "properties": {
+            "dump": { "$ref": "#/$defs/argv" },
+            "restore": { "$ref": "#/$defs/argv" },
+            "extension": { "type": "string", "pattern": "^[a-z0-9]+(\\.[a-z0-9]+){0,2}$" }
+          }
+        },
+        "helper": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["port", "paths"],
+          "properties": {
+            "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+            "paths": { "type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": { "$ref": "#/$defs/appPath" } }
+          }
+        }
+      },
+      "oneOf": [
+        { "required": ["image"] },
+        { "required": ["build"] }
+      ]
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build", "port", "resources", "volumes"],
+      "properties": {
+        "build": { "$ref": "#/$defs/build" },
+        "port": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+        "healthPath": { "$ref": "#/$defs/absPath", "default": "/tb/v1/health" },
+        "resources": { "$ref": "#/$defs/resources" },
+        "volumes": { "type": "array", "minItems": 1, "maxItems": 4, "items": { "$ref": "#/$defs/volume" } },
+        "env": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/envEntry" } },
+        "services": { "type": "array", "maxItems": 8, "items": { "$ref": "#/$defs/service" } }
+      }
+    },
+    "dynamic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "crudCeiling", "effectCeiling"],
+      "properties": {
+        "mode": { "enum": ["list", "search"] },
+        "crudCeiling": { "$ref": "#/$defs/crudSet" },
+        "effectCeiling": { "$ref": "#/$defs/effect" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "description", "crud", "effect", "idempotency", "receipt", "audience"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 1024 },
+        "input": { "$ref": "#/$defs/jsonSchemaObject" },
+        "output": { "$ref": "#/$defs/jsonSchemaObject" },
+        "crud": { "$ref": "#/$defs/crudSet" },
+        "effect": { "$ref": "#/$defs/effect" },
+        "holdFamily": { "$ref": "#/$defs/holdFamily" },
+        "scopeType": { "$ref": "#/$defs/snakeId" },
+        "idempotency": { "enum": ["required", "supported", "none"] },
+        "receipt": { "type": "boolean" },
+        "audience": { "enum": ["agent", "person"] },
+        "dynamic": { "$ref": "#/$defs/dynamic" }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "label", "labelPlural", "access", "defaultGrants", "summaryTemplate"],
+      "properties": {
+        "type": { "$ref": "#/$defs/snakeId" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "labelPlural": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "access": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "label", "crud"],
+            "properties": {
+              "id": { "$ref": "#/$defs/snakeId" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "crud": { "$ref": "#/$defs/crudSet" }
+            }
+          }
+        },
+        "defaultGrants": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["kind", "access"],
+            "properties": {
+              "kind": { "enum": ["own", "shared", "all"] },
+              "access": { "$ref": "#/$defs/snakeId" }
+            }
+          }
+        },
+        "summaryTemplate": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "settingField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "type", "label"],
+      "properties": {
+        "key": { "$ref": "#/$defs/snakeId" },
+        "type": { "enum": ["string", "text", "integer", "number", "boolean", "enum", "url"] },
+        "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "help": { "type": "string", "maxLength": 500 },
+        "required": { "type": "boolean", "default": false },
+        "default": { "type": ["string", "number", "integer", "boolean"] },
+        "choices": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["value", "label"],
+            "properties": {
+              "value": { "type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,39}$" },
+              "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+              "note": { "type": "string", "maxLength": 120 },
+              "disabled": { "type": "boolean", "default": false }
+            }
+          }
+        },
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "maxLength": { "type": "integer", "minimum": 1, "maximum": 10000 },
+        "pattern": { "type": "string", "maxLength": 256 },
+        "when": { "$ref": "#/$defs/condition" },
+        "mutable": { "type": "boolean", "default": true }
+      }
+    },
+    "settingKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "label", "provider", "required", "source", "usedBy"],
+      "properties": {
+        "name": { "$ref": "#/$defs/envName" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 60 },
+        "provider": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "help": { "type": "string", "maxLength": 500 },
+        "required": { "type": "boolean" },
+        "source": { "enum": ["account_default", "app_own"] },
+        "usedBy": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 9,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,31}$" }
+        },
+        "when": { "$ref": "#/$defs/condition" },
+        "step": { "$ref": "#/$defs/snakeId" }
+      }
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["steps"],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "title", "fields"],
+            "properties": {
+              "id": { "$ref": "#/$defs/snakeId" },
+              "title": { "type": "string", "minLength": 1, "maxLength": 60 },
+              "help": { "type": "string", "maxLength": 500 },
+              "when": { "$ref": "#/$defs/condition" },
+              "fields": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/settingField" } }
+            }
+          }
+        },
+        "keys": { "type": "array", "maxItems": 16, "items": { "$ref": "#/$defs/settingKey" } }
+      }
+    },
+    "hook": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "phase", "order", "match"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "phase": { "enum": ["before", "context", "after"] },
+        "order": { "type": "integer", "minimum": -1000, "maximum": 1000 },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["products"],
+          "properties": {
+            "products": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": { "anyOf": [{ "const": "*" }, { "$ref": "#/$defs/productId" }] }
+            },
+            "operations": { "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true, "items": { "$ref": "#/$defs/snakeId" } },
+            "effects": { "type": "array", "minItems": 1, "maxItems": 5, "uniqueItems": true, "items": { "$ref": "#/$defs/effect" } }
+          }
+        },
+        "timeoutMs": { "type": "integer", "minimum": 100, "maximum": 2000, "default": 2000 }
+      }
+    },
+    "companion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "operations", "crud", "purpose"],
+      "properties": {
+        "product": { "$ref": "#/$defs/productId" },
+        "operations": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": { "$ref": "#/$defs/snakeId" } },
+        "crud": { "$ref": "#/$defs/crudSet" },
+        "purpose": { "type": "string", "minLength": 1, "maxLength": 160 }
+      }
+    },
+    "skill": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "file"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(?!tb-)[a-z][a-z0-9-]{1,39}$" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "file": { "type": "string", "maxLength": 256, "pattern": "^(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]*SKILL\\.md$" },
+        "when": { "$ref": "#/$defs/condition" }
+      }
+    },
+    "harnessHint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["harness", "instructions"],
+      "properties": {
+        "harness": { "enum": ["generic", "claude_desktop", "codex_desktop", "tbd", "claude_agent_sdk", "eve", "tealbrick_cli"] },
+        "instructions": { "type": "string", "minLength": 1, "maxLength": 1000 }
+      }
+    },
+    "unlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "requires", "provides"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeId" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "requires": { "$ref": "#/$defs/productId" },
+        "provides": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "operations": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "$ref": "#/$defs/snakeId" } },
+            "skills": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z][a-z0-9-]{1,39}$" } }
+          }
+        }
+      }
+    },
+    "backups": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schedule", "retain"],
+      "properties": {
+        "schedule": { "type": "string", "pattern": "^([0-9*,/-]+) ([0-9*,/-]+) ([0-9*,/-]+) ([0-9*,/-]+) ([0-9*,/-]+)$" },
+        "retain": { "type": "integer", "minimum": 1, "maximum": 90 },
+        "files": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["volume", "path"],
+            "properties": {
+              "volume": { "$ref": "#/$defs/snakeId" },
+              "path": { "type": "string", "maxLength": 256, "pattern": "^(\\.|(?!/)(?!.*\\.\\.)[A-Za-z0-9._/-]+)$" }
+            }
+          }
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version", "sha256", "url"],
+      "properties": {
+        "id": { "$ref": "#/$defs/snakeId" },
+        "version": { "$ref": "#/$defs/semver" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "url": { "$ref": "#/$defs/httpsUrl" }
+      }
+    },
+    "publicRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "purpose"],
+      "properties": {
+        "path": { "$ref": "#/$defs/appPath" },
+        "purpose": { "enum": ["oauth_callback", "webhook"] }
+      }
+    },
+    "ui": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["launchPath"],
+      "properties": {
+        "launchPath": { "$ref": "#/$defs/appPath" },
+        "configurePath": { "$ref": "#/$defs/appPath" }
+      }
+    }
+  }
+}

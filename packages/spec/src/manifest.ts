@@ -1,0 +1,399 @@
+// Teal Brick miniapp manifest v2 (`tealbrick.miniapp/2`). v0.1, Lead · Specs, 2026-10-11.
+// Mirrors specs/manifest.schema.json exactly; MANIFEST.md holds the cross-field rules.
+// Data only: the `as const` vocabularies below are the ONE declaration of these literals.
+// `@opt2-tealbrick/manifest` re-exports them; no other package declares them.
+
+// ---------- Shared vocabularies ----------
+
+export const MANIFEST_SCHEMA = "tealbrick.miniapp/2" as const;
+export const CRUD_ACTIONS = ["create", "read", "update", "delete"] as const;
+/** Ordered: a dynamic `effectCeiling` admits every effect at or before it in this list. */
+export const EFFECTS = ["read", "write", "outward", "destructive", "money"] as const;
+export const HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money"] as const;
+export const AGENT_MODES = ["free", "bound"] as const;
+export const HOOK_PHASES = ["before", "context", "after"] as const;
+export const IDEMPOTENCY_MODES = ["required", "supported", "none"] as const;
+/** The ONE audience vocabulary. Bridge-only SDK calls (catalog, resolve, mark, scope summary) are bridge ops (`POST /tb/v1/bridge/<bop>`, CREDENTIALS `CallProofBridgeOpClaims`), not an audience. */
+export const OPERATION_AUDIENCES = ["agent", "person"] as const;
+export const DYNAMIC_MODES = ["list", "search"] as const;
+export const DEFAULT_GRANT_KINDS = ["own", "shared", "all"] as const;
+export const KEY_SOURCES = ["account_default", "app_own"] as const;
+export const SETTING_TYPES = ["string", "text", "integer", "number", "boolean", "enum", "url"] as const;
+export const VOLUME_PURPOSES = ["data", "backup"] as const;
+export const PUBLIC_ROUTE_PURPOSES = ["oauth_callback", "webhook"] as const;
+export const CATEGORIES = ["memory", "connectivity", "communication", "automation", "governance", "operations", "productivity", "developer"] as const;
+export const HARNESS_KINDS = ["generic", "claude_desktop", "codex_desktop", "tbd", "claude_agent_sdk", "eve", "tealbrick_cli"] as const;
+/** Standard operations every SDK app serves automatically (MANIFEST.md §5.4): one agent op, the rest person ops. Manifest ids never start with `tb_`. */
+export const STANDARD_OPERATIONS = ["tb.hold_status", "tb.holds_list", "tb.holds_decide", "tb.receipts_list", "tb.agents_list", "tb.scopes_set", "tb.keys_status", "tb.key_set", "tb.key_delete", "tb.export"] as const;
+
+export type CrudAction = (typeof CRUD_ACTIONS)[number];
+export type Effect = (typeof EFFECTS)[number];
+export type HoldFamily = (typeof HOLD_FAMILIES)[number];
+export type AgentMode = (typeof AGENT_MODES)[number];
+export type HookPhase = (typeof HOOK_PHASES)[number];
+export type IdempotencyMode = (typeof IDEMPOTENCY_MODES)[number];
+export type OperationAudience = (typeof OPERATION_AUDIENCES)[number];
+export type DynamicMode = (typeof DYNAMIC_MODES)[number];
+export type DefaultGrantKind = (typeof DEFAULT_GRANT_KINDS)[number];
+export type KeySource = (typeof KEY_SOURCES)[number];
+export type SettingType = (typeof SETTING_TYPES)[number];
+export type VolumePurpose = (typeof VOLUME_PURPOSES)[number];
+export type PublicRoutePurpose = (typeof PUBLIC_ROUTE_PURPOSES)[number];
+export type Category = (typeof CATEGORIES)[number];
+export type HarnessKind = (typeof HARNESS_KINDS)[number];
+export type StandardOperationId = (typeof STANDARD_OPERATIONS)[number];
+
+// ---------- Primitive aliases (patterns in the schema) ----------
+
+/** `^[a-z][a-z0-9-]{1,31}$` (CORE §1). */
+export type ProductId = string;
+/** `^(?!tb_)[a-z][a-z0-9_]{1,39}$`: operation, hook, scope type, step, setting, volume, access, unlock, artifact ids. */
+export type SnakeId = string;
+/** SemVer 2.0 without build metadata. */
+export type SemVer = string;
+/** `^https://host[:port][/path]`, no userinfo, query or fragment. */
+export type HttpsUrl = string;
+/** `^(?!TB_|RAILWAY_)[A-Z][A-Z0-9_]{1,63}$`. */
+export type EnvName = string;
+/** A JSON Schema 2020-12 document whose `type` is `"object"`; local `$ref` only. */
+export type JsonSchemaObject = { type: "object"; [keyword: string]: unknown };
+
+/** All-of equality on earlier settings; an array value means "one of". */
+export type Condition = Record<SnakeId, ConditionValue | ConditionValue[]>;
+export type ConditionValue = string | boolean | number;
+
+// ---------- Manifest ----------
+
+export interface Manifest {
+  $schema?: string;
+  schema: typeof MANIFEST_SCHEMA;
+  id: ProductId;
+  name: string;
+  summary: string;
+  description?: string;
+  /** SemVer; major = licence major (`isEntitled(workspace, product, major)`). */
+  version: SemVer;
+  /** SDK major the app is built with; the SDK refuses to boot on mismatch. */
+  sdkMajor: number;
+  publisher: { name: string; url?: HttpsUrl };
+  source: { repo: HttpsUrl; license: string };
+  icon: { svgPath: string; viewBox?: string };
+  discovery: Discovery;
+  runtime: Runtime;
+  operations: Operation[];
+  scopes?: Scope[];
+  settings?: Settings;
+  hooks?: Hook[];
+  companions?: Companion[];
+  needsAgentDirectory?: boolean;
+  skills?: Skill[];
+  harnessHints?: HarnessHint[];
+  unlocks?: Unlock[];
+  backups: Backups;
+  artifacts?: Artifact[];
+  publicRoutes?: PublicRoute[];
+  ui?: Ui;
+}
+
+export interface Discovery {
+  category: Category;
+  /** 1..60 phrases. */
+  intents: string[];
+  keywords?: string[];
+}
+
+// ---------- Runtime ----------
+
+export interface Build {
+  /** Repo-relative build context, `.` = repo root. */
+  context: string;
+  /** Repo-relative Dockerfile path. */
+  dockerfile: string;
+}
+
+export interface Resources {
+  /** vCPU, 0.1..32. */
+  cpu: number;
+  memoryMb: number;
+}
+
+export interface Volume {
+  id: SnakeId;
+  mountPath: string;
+  sizeGb: number;
+  purpose: VolumePurpose;
+}
+
+/** Exactly one of `value`, `setting`, `generate`. */
+export type EnvEntry =
+  | { name: EnvName; value: string; setting?: never; generate?: never }
+  | { name: EnvName; setting: SnakeId; value?: never; generate?: never }
+  | { name: EnvName; generate: "secret"; value?: never; setting?: never };
+
+export type Health = { kind: "http"; path: string } | { kind: "tcp" };
+
+export interface ServiceBackup {
+  dump: string[];
+  restore: string[];
+  extension: string;
+}
+
+export interface ServiceHelper {
+  port: number;
+  paths: string[];
+}
+
+interface ServiceBase {
+  id: string;
+  title?: string;
+  port: number;
+  resources: Resources;
+  volumes?: Volume[];
+  health: Health;
+  env?: EnvEntry[];
+  when?: Condition;
+  startOrder: number;
+  backup?: ServiceBackup;
+  helper?: ServiceHelper;
+}
+
+/** Exactly one of `image` (pinned `...@sha256:<64 hex>`) or `build`. */
+export type Service =
+  | (ServiceBase & { image: string; build?: never })
+  | (ServiceBase & { build: Build; image?: never });
+
+export interface Runtime {
+  build: Build;
+  port: number;
+  /** Default `/tb/v1/health` (served by the SDK). */
+  healthPath?: string;
+  resources: Resources;
+  volumes: Volume[];
+  env?: EnvEntry[];
+  services?: Service[];
+}
+
+// ---------- Operations ----------
+
+export interface DynamicSpec {
+  mode: DynamicMode;
+  crudCeiling: CrudAction[];
+  effectCeiling: Effect;
+}
+
+export interface Operation {
+  id: SnakeId;
+  title: string;
+  description: string;
+  /** Required unless `dynamic` or `audience: "person"` with no input. */
+  input?: JsonSchemaObject;
+  output?: JsonSchemaObject;
+  crud: CrudAction[];
+  effect: Effect;
+  holdFamily?: HoldFamily;
+  scopeType?: SnakeId;
+  idempotency: IdempotencyMode;
+  receipt: boolean;
+  audience: OperationAudience;
+  dynamic?: DynamicSpec;
+}
+
+/** One entry of a dynamic operation's catalog (bridge op `POST /tb/v1/bridge/catalog`, search results). */
+export interface DynamicCatalogEntry {
+  /** `^[a-z][a-z0-9_]{1,47}$`, unique within the app. */
+  name: string;
+  title: string;
+  description: string;
+  inputSchema: JsonSchemaObject;
+  crud: CrudAction[];
+  effect: Effect;
+  holdFamily?: HoldFamily;
+}
+
+/** Fixed input of every dynamic operation call (`POST /tb/v1/ops/<op>`). */
+export interface DynamicCallInput {
+  tool: string;
+  arguments: Record<string, unknown>;
+}
+
+/** Fixed input of a search-mode `<product>__<op>_search` call. */
+export interface DynamicSearchInput {
+  query: string;
+  limit?: number;
+}
+
+/** Answer of bridge op `POST /tb/v1/bridge/resolve` (cacheable 5 min). */
+export interface DynamicResolution {
+  tool: string;
+  crud: CrudAction[];
+  effect: Effect;
+  holdFamily?: HoldFamily;
+}
+
+// ---------- Scopes ----------
+
+export interface ScopeAccessLevel {
+  id: SnakeId;
+  label: string;
+  crud: CrudAction[];
+}
+
+export interface DefaultGrant {
+  kind: DefaultGrantKind;
+  access: SnakeId;
+}
+
+export interface Scope {
+  type: SnakeId;
+  label: string;
+  labelPlural: string;
+  access: ScopeAccessLevel[];
+  defaultGrants: DefaultGrant[];
+  /** Variables: `{count}`, `{label}`, `{labelPlural}`, `{access.<id>}`. Rendered output ≤ 80 chars. */
+  summaryTemplate: string;
+}
+
+// ---------- Settings and keys ----------
+
+export interface SettingChoice {
+  value: string;
+  label: string;
+  note?: string;
+  disabled?: boolean;
+}
+
+export interface SettingField {
+  key: SnakeId;
+  type: SettingType;
+  label: string;
+  help?: string;
+  required?: boolean;
+  default?: string | number | boolean;
+  choices?: SettingChoice[];
+  min?: number;
+  max?: number;
+  maxLength?: number;
+  pattern?: string;
+  when?: Condition;
+  mutable?: boolean;
+}
+
+export interface SettingStep {
+  id: SnakeId;
+  title: string;
+  help?: string;
+  when?: Condition;
+  fields: SettingField[];
+}
+
+export interface KeyRequirement {
+  name: EnvName;
+  label: string;
+  provider: string;
+  help?: string;
+  required: boolean;
+  /** `account_default`: GUI label "workspace default key" (stored per workspace bridge). */
+  source: KeySource;
+  /** `"app"` or `runtime.services[].id`. */
+  usedBy: string[];
+  when?: Condition;
+  step?: SnakeId;
+}
+
+export interface Settings {
+  steps: SettingStep[];
+  keys?: KeyRequirement[];
+}
+
+// ---------- Hooks, companions, unlocks ----------
+
+export interface HookMatch {
+  products: ("*" | ProductId)[];
+  operations?: SnakeId[];
+  effects?: Effect[];
+}
+
+export interface Hook {
+  id: SnakeId;
+  title: string;
+  phase: HookPhase;
+  order: number;
+  match: HookMatch;
+  /** 100..2000, default 2000. */
+  timeoutMs?: number;
+}
+
+export interface Companion {
+  product: ProductId;
+  operations: SnakeId[];
+  crud: CrudAction[];
+  purpose: string;
+}
+
+export interface Unlock {
+  id: SnakeId;
+  title: string;
+  /** Companion product id; must appear in `companions`. */
+  requires: ProductId;
+  provides: { operations?: SnakeId[]; skills?: string[] };
+}
+
+// ---------- Skills, hints ----------
+
+export interface Skill {
+  /** `^(?!tb-)[a-z][a-z0-9-]{1,39}$`. */
+  id: string;
+  title: string;
+  /** Repo-relative path ending in `SKILL.md`. */
+  file: string;
+  when?: Condition;
+}
+
+export interface HarnessHint {
+  harness: HarnessKind;
+  instructions: string;
+}
+
+// ---------- Backups, artifacts, routes, UI ----------
+
+export interface Backups {
+  /** 5-field cron, UTC. */
+  schedule: string;
+  /** Number of backup archives kept, 1..90. */
+  retain: number;
+  files?: { volume: SnakeId; path: string }[];
+}
+
+export interface Artifact {
+  id: SnakeId;
+  version: SemVer;
+  /** Lower-case hex SHA-256 of the asset bytes. */
+  sha256: string;
+  url: HttpsUrl;
+}
+
+export interface PublicRoute {
+  path: string;
+  purpose: PublicRoutePurpose;
+}
+
+export interface Ui {
+  launchPath: string;
+  configurePath?: string;
+}
+
+// ---------- Validator surface (implemented in @opt2-tealbrick/manifest) ----------
+
+export interface ManifestIssue {
+  /** RFC 6901 pointer into the manifest. */
+  path: string;
+  /** Rule id from MANIFEST.md, e.g. `M-OP-3`. */
+  rule: string;
+  /** snake_case error code. */
+  code: string;
+  message: string;
+}
+
+export type ManifestValidation =
+  | { ok: true; manifest: Manifest; digest: `sha256:${string}` }
+  | { ok: false; errors: ManifestIssue[] };

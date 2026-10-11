@@ -23,3 +23,14 @@ Woodpecker CI (shared opt2 pipeline template from `opt2-tealbrick-platform`).
 ## Language
 
 New code is TypeScript (Node 24+). Swift only where the macOS app requires it.
+
+## Contents
+
+- `docs/` — the frozen opt2 interface specs (v0.1, frozen 2026-10-11; see `docs/FROZEN`). Mirror of the coordination folder; contracts change only through Lead · Specs with a Coordinator decision.
+- `packages/spec` — `@opt2-tealbrick/spec`: JSON Schemas (`schemas/`), TypeScript types + data tables (`src/`: manifest vocabularies, credential registry, bridge wire types, route table, SDK signatures), example manifest. Data and types only; logic lives in `@opt2-tealbrick/manifest` (opt2-tealbrick-sdk).
+
+Install by release URL (no npm registry):
+
+```json
+"@opt2-tealbrick/spec": "https://github.com/Martin-Atrin/opt2-tealbrick-specs/releases/download/spec-v0.1.0/opt2-tealbrick-spec-0.1.0.tgz"
+```

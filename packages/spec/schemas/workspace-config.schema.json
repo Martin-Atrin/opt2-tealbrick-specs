@@ -1,0 +1,837 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spec.opt2.tealbrick.com/workspace-config.schema.json",
+  "title": "Workspace config payload (tb-config+jws)",
+  "description": "v0.1. JWS payload of the signed workspace config pulled by the bridge (BRIDGE.md §5.5). Signed by Portal (iss tb:portal); in standalone the bridge re-mints from the frozen final config (BRIDGE §11). $defs are shared with instance-slice.schema.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "v",
+    "iss",
+    "sub",
+    "aud",
+    "iat",
+    "exp",
+    "jti",
+    "ws",
+    "rev",
+    "workspace",
+    "bridge",
+    "portalKeys",
+    "pause",
+    "revoked",
+    "connections",
+    "instanceKeys",
+    "grants",
+    "apps",
+    "agents",
+    "hooks",
+    "skills",
+    "keyRequirements",
+    "enrolCodes"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "iss": {
+      "anyOf": [
+        {
+          "const": "tb:portal"
+        },
+        {
+          "$ref": "#/$defs/brgAudience"
+        }
+      ]
+    },
+    "sub": {
+      "$ref": "#/$defs/brgAudience"
+    },
+    "aud": {
+      "$ref": "#/$defs/brgAudience"
+    },
+    "iat": {
+      "$ref": "#/$defs/epochSeconds"
+    },
+    "exp": {
+      "$ref": "#/$defs/epochSeconds",
+      "description": "iat + 12 h (43200 s). Past exp the bridge fails closed for agent and app-to-app calls (C9)."
+    },
+    "jti": {
+      "$ref": "#/$defs/ulid"
+    },
+    "ws": {
+      "$ref": "#/$defs/wsId"
+    },
+    "rev": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Monotonic revision (CREDENTIALS K9 claim)."
+    },
+    "workspace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/wsId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      }
+    },
+    "bridge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "publicUrl"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/brgId"
+        },
+        "publicUrl": {
+          "$ref": "#/$defs/httpsUrl"
+        }
+      }
+    },
+    "portalKeys": {
+      "$ref": "#/$defs/portalKeys"
+    },
+    "pause": {
+      "$ref": "#/$defs/pause"
+    },
+    "revoked": {
+      "$ref": "#/$defs/revoked"
+    },
+    "connections": {
+      "type": "array",
+      "maxItems": 5000,
+      "items": {
+        "$ref": "#/$defs/connectionEntry"
+      }
+    },
+    "instanceKeys": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/instanceKeyEntry"
+      }
+    },
+    "grants": {
+      "type": "array",
+      "maxItems": 10000,
+      "description": "Agent-to-app grants (K10 compact JWS). Companion grants travel inside instance slices.",
+      "items": {
+        "$ref": "#/$defs/compactJws"
+      }
+    },
+    "apps": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/appEntry"
+      }
+    },
+    "agents": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/agentEntry"
+      }
+    },
+    "hooks": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/hookEntry"
+      }
+    },
+    "skills": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "files"
+      ],
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "files": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "product",
+              "id",
+              "title",
+              "content"
+            ],
+            "properties": {
+              "product": {
+                "$ref": "#/$defs/productId"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^(?!tb-)[a-z][a-z0-9-]{1,39}$"
+              },
+              "title": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "when": {
+                "type": "string",
+                "maxLength": 200,
+                "description": "Human-readable usage hint for the instructions index."
+              },
+              "content": {
+                "type": "string",
+                "maxLength": 65536,
+                "description": "SKILL.md rendered by Core; {{agent.name}} and {{agent.id}} are left for the bridge."
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyRequirements": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/keyRequirement"
+      }
+    },
+    "enrolCodes": {
+      "type": "array",
+      "maxItems": 128,
+      "items": {
+        "$ref": "#/$defs/enrolCodeEntry"
+      }
+    },
+    "standalone": {
+      "$ref": "#/$defs/standaloneBlock"
+    }
+  },
+  "$defs": {
+    "ulid": {
+      "type": "string",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "wsId": {
+      "type": "string",
+      "pattern": "^ws_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "agtId": {
+      "type": "string",
+      "pattern": "^agt_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "conId": {
+      "type": "string",
+      "pattern": "^con_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "insId": {
+      "type": "string",
+      "pattern": "^ins_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "brgId": {
+      "type": "string",
+      "pattern": "^brg_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "edgId": {
+      "type": "string",
+      "pattern": "^edg_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "brgAudience": {
+      "type": "string",
+      "pattern": "^tb:brg:brg_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "insAudience": {
+      "type": "string",
+      "pattern": "^tb:ins:ins_[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "productId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$"
+    },
+    "snakeId": {
+      "type": "string",
+      "pattern": "^(?!tb_)[a-z][a-z0-9_]{1,39}$"
+    },
+    "serviceId": {
+      "type": "string",
+      "pattern": "^(?!tb-)[a-z][a-z0-9-]{1,31}$"
+    },
+    "keyName": {
+      "type": "string",
+      "pattern": "^(?!TB_|RAILWAY_)[A-Z][A-Z0-9_]{1,63}$",
+      "description": "Same as manifest envName."
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$"
+    },
+    "epochSeconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "compactJws": {
+      "type": "string",
+      "maxLength": 65536,
+      "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+    },
+    "httpsUrl": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^https://[^\\s/?#@]+(/[^\\s?#]*)?$"
+    },
+    "internalUrl": {
+      "type": "string",
+      "maxLength": 512,
+      "pattern": "^https?://[^\\s/?#@]+$",
+      "description": "Private-network origin of an app instance (no path)."
+    },
+    "crudAction": {
+      "enum": [
+        "create",
+        "read",
+        "update",
+        "delete"
+      ]
+    },
+    "effect": {
+      "enum": [
+        "read",
+        "write",
+        "outward",
+        "destructive",
+        "money"
+      ]
+    },
+    "agentMode": {
+      "enum": [
+        "free",
+        "bound"
+      ]
+    },
+    "ed25519Jwk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kty",
+        "crv",
+        "x"
+      ],
+      "properties": {
+        "kty": {
+          "const": "OKP"
+        },
+        "crv": {
+          "const": "Ed25519"
+        },
+        "x": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$"
+        },
+        "kid": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "RFC 7638 thumbprint."
+        },
+        "alg": {
+          "const": "EdDSA"
+        },
+        "use": {
+          "const": "sig"
+        }
+      }
+    },
+    "appEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ins",
+        "product",
+        "version",
+        "sdkMajor",
+        "manifestDigest",
+        "internalUrl",
+        "entitled",
+        "slice"
+      ],
+      "properties": {
+        "ins": {
+          "$ref": "#/$defs/insId"
+        },
+        "product": {
+          "$ref": "#/$defs/productId"
+        },
+        "version": {
+          "$ref": "#/$defs/semver"
+        },
+        "sdkMajor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "manifestDigest": {
+          "$ref": "#/$defs/digest"
+        },
+        "internalUrl": {
+          "$ref": "#/$defs/internalUrl"
+        },
+        "entitled": {
+          "type": "boolean",
+          "description": "Informational (status/display). Enforcement is by absent grants/hooks/tickets; the bridge never decides on it."
+        },
+        "slice": {
+          "$ref": "#/$defs/compactJws"
+        }
+      }
+    },
+    "agentEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agt",
+        "name",
+        "mode"
+      ],
+      "properties": {
+        "agt": {
+          "$ref": "#/$defs/agtId"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "mode": {
+          "$ref": "#/$defs/agentMode"
+        }
+      }
+    },
+    "connectionEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "con",
+        "agt",
+        "method",
+        "gen",
+        "status"
+      ],
+      "properties": {
+        "con": {
+          "$ref": "#/$defs/conId"
+        },
+        "agt": {
+          "$ref": "#/$defs/agtId"
+        },
+        "method": {
+          "enum": [
+            "key",
+            "pairing"
+          ]
+        },
+        "gen": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Connection credential generation; K5 with another gen is refused."
+        },
+        "publicKey": {
+          "$ref": "#/$defs/ed25519Jwk",
+          "description": "Key method only (K4 verifier)."
+        },
+        "status": {
+          "enum": [
+            "active",
+            "revoked"
+          ]
+        }
+      },
+      "if": {
+        "properties": {
+          "method": {
+            "const": "key"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "publicKey"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "publicKey"
+          ]
+        }
+      }
+    },
+    "hookEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "ins",
+        "product",
+        "hookId",
+        "phase",
+        "order",
+        "timeoutMs",
+        "match"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{1,31}\\.[a-z][a-z0-9_]{1,39}$",
+          "description": "<product>.<hookId>"
+        },
+        "ins": {
+          "$ref": "#/$defs/insId"
+        },
+        "product": {
+          "$ref": "#/$defs/productId"
+        },
+        "hookId": {
+          "$ref": "#/$defs/snakeId"
+        },
+        "phase": {
+          "enum": [
+            "before",
+            "context",
+            "after"
+          ]
+        },
+        "order": {
+          "type": "integer",
+          "minimum": -1000,
+          "maximum": 1000
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 2000
+        },
+        "match": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "products"
+          ],
+          "properties": {
+            "products": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "uniqueItems": true,
+              "items": {
+                "anyOf": [
+                  {
+                    "const": "*"
+                  },
+                  {
+                    "$ref": "#/$defs/productId"
+                  }
+                ]
+              }
+            },
+            "operations": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/snakeId"
+              }
+            },
+            "effects": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/effect"
+              }
+            }
+          }
+        }
+      }
+    },
+    "keyRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "label",
+        "ins",
+        "product",
+        "required",
+        "source",
+        "usedBy"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/keyName"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "provider": {
+          "type": "string",
+          "maxLength": 60
+        },
+        "ins": {
+          "$ref": "#/$defs/insId"
+        },
+        "product": {
+          "$ref": "#/$defs/productId"
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "source": {
+          "enum": [
+            "account_default",
+            "app_own"
+          ]
+        },
+        "usedBy": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "anyOf": [
+              {
+                "const": "app"
+              },
+              {
+                "$ref": "#/$defs/serviceId"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "enrolCodeEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "digest",
+        "kind",
+        "exp"
+      ],
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "kind": {
+          "enum": [
+            "instance",
+            "service",
+            "neighbour"
+          ]
+        },
+        "ins": {
+          "$ref": "#/$defs/insId"
+        },
+        "product": {
+          "$ref": "#/$defs/productId"
+        },
+        "service": {
+          "$ref": "#/$defs/serviceId"
+        },
+        "exp": {
+          "$ref": "#/$defs/epochSeconds"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "service"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ins",
+              "service"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "instance",
+                  "neighbour"
+                ]
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ins",
+              "product"
+            ]
+          }
+        }
+      ]
+    },
+    "standaloneBlock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuer",
+        "kid",
+        "ownerKeys"
+      ],
+      "description": "CREDENTIALS §17. Present only in the final Portal-signed config/slices.",
+      "properties": {
+        "issuer": {
+          "$ref": "#/$defs/brgAudience"
+        },
+        "kid": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{43}$",
+          "description": "Thumbprint of the bridge key (K7) that becomes the issuer."
+        },
+        "ownerKeys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {
+            "$ref": "#/$defs/ed25519Jwk"
+          }
+        }
+      }
+    },
+    "portalKeys": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 8,
+      "description": "CREDENTIALS §5.1. Empty only in the final standalone config.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "jwk",
+          "status"
+        ],
+        "properties": {
+          "jwk": {
+            "$ref": "#/$defs/ed25519Jwk"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "active",
+              "retired"
+            ]
+          }
+        }
+      }
+    },
+    "pause": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workspace",
+        "agents",
+        "instances"
+      ],
+      "properties": {
+        "workspace": {
+          "type": "boolean",
+          "description": "Workspace kill switch."
+        },
+        "agents": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 500,
+          "items": {
+            "$ref": "#/$defs/agtId"
+          }
+        },
+        "instances": {
+          "type": "array",
+          "uniqueItems": true,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/insId"
+          }
+        }
+      },
+      "description": "Workspace kill switch, agent pause, instance pause. No connections: a connection revoke is enforced only at the bridge (connections[].status)."
+    },
+    "revoked": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "jtis"
+      ],
+      "properties": {
+        "jtis": {
+          "type": "array",
+          "maxItems": 20000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "jti",
+              "exp"
+            ],
+            "properties": {
+              "jti": {
+                "$ref": "#/$defs/ulid"
+              },
+              "exp": {
+                "$ref": "#/$defs/epochSeconds"
+              }
+            }
+          }
+        }
+      }
+    },
+    "instanceKeyEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ins",
+        "jwk"
+      ],
+      "properties": {
+        "ins": {
+          "$ref": "#/$defs/insId"
+        },
+        "svc": {
+          "$ref": "#/$defs/serviceId"
+        },
+        "jwk": {
+          "$ref": "#/$defs/ed25519Jwk"
+        }
+      }
+    }
+  }
+}

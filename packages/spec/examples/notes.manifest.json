@@ -1,0 +1,283 @@
+{
+  "$schema": "https://spec.opt2.tealbrick.com/manifest.schema.json",
+  "schema": "tealbrick.miniapp/2",
+  "id": "notes",
+  "name": "Notes",
+  "summary": "EXAMPLE: shared and per-agent notebooks your agents can read, write and search.",
+  "description": "Illustrative example manifest for MANIFEST.md. Not a product.",
+  "version": "1.2.0",
+  "sdkMajor": 1,
+  "publisher": { "name": "Example Org", "url": "https://example.org" },
+  "source": { "repo": "https://github.com/example-org/notes-miniapp", "license": "Apache-2.0" },
+  "icon": { "svgPath": "M5 3h11l3 3v15H5z M8 9h8 M8 13h8 M8 17h5", "viewBox": "0 0 24 24" },
+  "discovery": {
+    "category": "productivity",
+    "intents": ["take notes", "keep a notebook for my agent", "share notes between agents", "search my notes", "email a note"],
+    "keywords": ["notes", "notebook", "markdown"]
+  },
+  "runtime": {
+    "build": { "context": ".", "dockerfile": "Dockerfile" },
+    "port": 8080,
+    "healthPath": "/tb/v1/health",
+    "resources": { "cpu": 0.5, "memoryMb": 512 },
+    "volumes": [
+      { "id": "data", "mountPath": "/data", "sizeGb": 5, "purpose": "data" },
+      { "id": "backup", "mountPath": "/backup", "sizeGb": 10, "purpose": "backup" }
+    ],
+    "env": [
+      { "name": "NOTES_DEFAULT_FORMAT", "setting": "default_format" },
+      { "name": "NOTES_SUMMARY_MODEL", "setting": "summary_model" },
+      { "name": "NOTES_SEARCH_URL", "value": "{{services.search.url}}" },
+      { "name": "NOTES_SEARCH_MASTER_KEY", "value": "{{services.search.env.MEILI_MASTER_KEY}}" }
+    ],
+    "services": [
+      {
+        "id": "search",
+        "title": "Full-text index",
+        "image": "getmeili/meilisearch:v1.10.3@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        "port": 7700,
+        "resources": { "cpu": 0.25, "memoryMb": 512 },
+        "volumes": [{ "id": "search_index", "mountPath": "/meili_data", "sizeGb": 2, "purpose": "data" }],
+        "health": { "kind": "http", "path": "/health" },
+        "env": [
+          { "name": "MEILI_MASTER_KEY", "generate": "secret" },
+          { "name": "MEILI_ENV", "value": "production" }
+        ],
+        "when": { "search_index": "fulltext" },
+        "startOrder": 0
+      }
+    ]
+  },
+  "operations": [
+    {
+      "id": "note_create",
+      "title": "Create note",
+      "description": "Create a note in a notebook the caller may write to.",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["notebook", "title", "body"],
+        "properties": {
+          "notebook": { "type": "string" },
+          "title": { "type": "string", "maxLength": 200 },
+          "body": { "type": "string", "maxLength": 100000 },
+          "tags": { "type": "array", "items": { "type": "string" }, "maxItems": 20 }
+        }
+      },
+      "output": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } },
+      "crud": ["create"],
+      "effect": "write",
+      "scopeType": "notebook",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "note_get",
+      "title": "Get note",
+      "description": "Read one note by id.",
+      "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } },
+      "output": { "type": "object" },
+      "crud": ["read"],
+      "effect": "read",
+      "scopeType": "notebook",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "note_search",
+      "title": "Search notes",
+      "description": "Full-text search across the notebooks the caller may read.",
+      "input": { "type": "object", "required": ["query"], "properties": { "query": { "type": "string", "maxLength": 500 }, "limit": { "type": "integer", "minimum": 1, "maximum": 50 } } },
+      "output": { "type": "object", "properties": { "hits": { "type": "array" } } },
+      "crud": ["read"],
+      "effect": "read",
+      "scopeType": "notebook",
+      "idempotency": "none",
+      "receipt": false,
+      "audience": "agent"
+    },
+    {
+      "id": "note_update",
+      "title": "Update note",
+      "description": "Replace the title, body or tags of a note.",
+      "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "body": { "type": "string" } } },
+      "output": { "type": "object" },
+      "crud": ["update"],
+      "effect": "write",
+      "scopeType": "notebook",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "note_delete",
+      "title": "Delete note",
+      "description": "Delete a note permanently.",
+      "input": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } },
+      "output": { "type": "object" },
+      "crud": ["delete"],
+      "effect": "destructive",
+      "holdFamily": "destructive",
+      "scopeType": "notebook",
+      "idempotency": "supported",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "note_send",
+      "title": "Email note",
+      "description": "Send a note by email to an outside address.",
+      "input": { "type": "object", "required": ["id", "to"], "properties": { "id": { "type": "string" }, "to": { "type": "string", "format": "email" } } },
+      "output": { "type": "object" },
+      "crud": ["create"],
+      "effect": "outward",
+      "holdFamily": "first_contact",
+      "scopeType": "notebook",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "note_from_event",
+      "title": "Note from calendar event",
+      "description": "Create a meeting note prefilled from a calendar event.",
+      "input": { "type": "object", "required": ["notebook", "eventId"], "properties": { "notebook": { "type": "string" }, "eventId": { "type": "string" } } },
+      "output": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string" } } },
+      "crud": ["create"],
+      "effect": "write",
+      "scopeType": "notebook",
+      "idempotency": "required",
+      "receipt": true,
+      "audience": "agent"
+    },
+    {
+      "id": "notebook_rename",
+      "title": "Rename notebook",
+      "description": "Rename a notebook (owner only, from the app UI).",
+      "input": { "type": "object", "required": ["notebook", "label"], "properties": { "notebook": { "type": "string" }, "label": { "type": "string", "maxLength": 60 } } },
+      "output": { "type": "object" },
+      "crud": ["update"],
+      "effect": "write",
+      "idempotency": "supported",
+      "receipt": false,
+      "audience": "person"
+    }
+  ],
+  "scopes": [
+    {
+      "type": "notebook",
+      "label": "Notebook",
+      "labelPlural": "Notebooks",
+      "access": [
+        { "id": "read", "label": "Read", "crud": ["read"] },
+        { "id": "read_write", "label": "Read and write", "crud": ["read", "create", "update", "delete"] }
+      ],
+      "defaultGrants": [
+        { "kind": "own", "access": "read_write" },
+        { "kind": "shared", "access": "read" }
+      ],
+      "summaryTemplate": "{count} {labelPlural} ({access.read_write} write)"
+    }
+  ],
+  "settings": {
+    "steps": [
+      {
+        "id": "basics",
+        "title": "Notes setup",
+        "fields": [
+          {
+            "key": "default_format",
+            "type": "enum",
+            "label": "Default note format",
+            "required": true,
+            "default": "markdown",
+            "choices": [
+              { "value": "markdown", "label": "Markdown" },
+              { "value": "plain", "label": "Plain text" }
+            ]
+          },
+          {
+            "key": "search_index",
+            "type": "enum",
+            "label": "Search",
+            "help": "Full-text adds a small search service to your Railway project.",
+            "required": true,
+            "default": "builtin",
+            "mutable": false,
+            "choices": [
+              { "value": "builtin", "label": "Built-in (simple)" },
+              { "value": "fulltext", "label": "Full-text index" },
+              { "value": "semantic", "label": "Semantic", "disabled": true, "note": "Coming later" }
+            ]
+          },
+          { "key": "summaries", "type": "boolean", "label": "Write AI summaries for long notes", "default": false }
+        ]
+      },
+      {
+        "id": "models",
+        "title": "Model key",
+        "when": { "summaries": true },
+        "fields": [
+          { "key": "summary_model", "type": "string", "label": "Summary model name", "default": "gpt-4o-mini", "maxLength": 64 }
+        ]
+      }
+    ],
+    "keys": [
+      {
+        "name": "OPENAI_API_KEY",
+        "label": "OpenAI API key",
+        "provider": "OpenAI",
+        "help": "Used only to write summaries.",
+        "required": true,
+        "source": "account_default",
+        "usedBy": ["app"],
+        "when": { "summaries": true },
+        "step": "models"
+      }
+    ]
+  },
+  "hooks": [
+    {
+      "id": "secret_guard",
+      "title": "Block pasted secrets in notes",
+      "phase": "before",
+      "order": 100,
+      "match": { "products": ["notes"], "operations": ["note_create", "note_update"] },
+      "timeoutMs": 500
+    }
+  ],
+  "companions": [
+    { "product": "calendar", "operations": ["event_get"], "crud": ["read"], "purpose": "Prefill meeting notes from calendar events" }
+  ],
+  "needsAgentDirectory": false,
+  "skills": [
+    { "id": "notes-basics", "title": "How to use Notes", "file": "skills/notes-basics/SKILL.md" },
+    { "id": "notes-summaries", "title": "Writing note summaries", "file": "skills/notes-summaries/SKILL.md", "when": { "summaries": true } }
+  ],
+  "harnessHints": [
+    { "harness": "generic", "instructions": "Search notes before creating a new one; write into your own notebook unless the owner asks for the shared one." },
+    { "harness": "tbd", "instructions": "Offer to save a daily summary of the Companion timeline as a note in your own notebook." }
+  ],
+  "unlocks": [
+    { "id": "meeting_notes", "title": "Meeting notes from calendar events", "requires": "calendar", "provides": { "operations": ["note_from_event"] } }
+  ],
+  "backups": {
+    "schedule": "17 3 * * *",
+    "retain": 14,
+    "files": [{ "volume": "data", "path": "attachments" }]
+  },
+  "artifacts": [
+    {
+      "id": "templates",
+      "version": "1.0.0",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "url": "https://github.com/example-org/notes-miniapp/releases/download/v1.2.0/templates-1.0.0.tar.gz"
+    }
+  ],
+  "publicRoutes": [
+    { "path": "/inbound/email", "purpose": "webhook" }
+  ],
+  "ui": { "launchPath": "/", "configurePath": "/configure" }
+}

@@ -1,0 +1,382 @@
+# opt2 specs — PORTAL-API (route registry)
+
+Status: v0.1, Lead · Specs, 2026-10-11 (v0 review items B1–B4, B6, B8, S1–S4, S6, N8, N10, N12, N13 applied). Machine-readable source of truth: `types/routes.ts` (`ROUTES`, `AUDIT_ACTIONS`, `REGISTRIES`, `RATE_CLASSES`, `TRANSPORTS`, every input/output interface). This file is the rule book and a compact index; where they disagree, `routes.ts` wins and this file is a spec bug (CORE §0).
+
+Scope: every operation Portal Core exposes — to the Portal GUI (browser), the owner CLI / TBD human sign-in (owner native session), the workspace bridge, the device flow, and Stripe — plus the 15 Core registries that own the data those operations read and write, drafts/recipes, and the coverage of every journey action (SPEC-REVIEW-CHECKLIST §3). Out of scope: bridge-internal and app-internal routes (BRIDGE.md, SDK-API.md), credential formats and lifetimes (CREDENTIALS.md), manifest fields (MANIFEST.md). Core holds no tool traffic, no app data and no key values (PRD §7.2); §8 lists the ops that must not exist.
+
+## 1. Conventions
+
+### 1.1 Topology and exposure
+| Rule | Statement |
+|---|---|
+| Base | Public base `https://<portal domain>/api/v1`. The path after `/api/v1` is identical at the gateway and at Core. |
+| Core is private | Core listens only on the private network of Portal's own Railway project. The only caller is the Portal GUI's generated gateway. Core has no public domain. |
+| Generated gateway | Core serves `GET /internal/routes` → `{digest, routes}` (`routes.list`, exposure `internal`). The GUI builds its ONE gateway handler from it at boot and re-reads it when Core's `TB-Routes-Digest` response header differs from the cached digest. No hand-written route table exists in the GUI. |
+| Default deny | Core's router, validators, rate limiter and audit hooks are built from `ROUTES` only. A request that matches no row → `404 not_found` at the gateway and at Core. `exposure: "internal"` rows are never forwarded by the gateway. There is no passthrough prefix and no "safe because the gateway does not forward it" route. |
+| Explicit public rows | Every unauthenticated path is its own row: `device.start` (public), `device.token` (device), `bridge_api.enrol` (public, one-time code in body), `stripe.webhook` (Stripe signature). Nothing else is reachable without a credential. |
+| JSON only | Core returns JSON (plus one SSE stream, one long-poll, one zip download). No HTML, no static assets, no cookies, no passwords, no SSO (PRD §7.2). |
+| Data store | Managed Postgres, one table set per registry (C7). |
+| No home-infra | No row, default or example contains a host name, tailnet suffix, machine name or personal user name. Portal domain, release index URL and Stripe/Railway identifiers are deployment configuration, not registry content. |
+
+### 1.2 Auth classes (each maps to one CREDENTIALS kind)
+| `auth` | Credential | How it arrives | Principal resolved by Core |
+|---|---|---|---|
+| `browser` | K1 Clerk person session | Gateway reads the Clerk session and forwards `Authorization: Bearer <Clerk session JWT>`; gateway enforces same-origin on non-GET | account + person (account row created on first `account.me`) |
+| `owner-cli` | K3 owner native session (`tbo_`, client `cli` or `tbd`) | `Authorization: Bearer tbo_…` | account + `osn` session id |
+| `bridge` | K7 bridge assertion (`tb-bridge-assert+jwt`, CREDENTIALS §10) | `TB-Assert: <jws>` (never `Authorization`), `aud = tb:portal`, bound to method + URL (+ body digest), ≤ 60 s, verified with the bridge public key from the Instance Registry | bridge id → workspace |
+| `device` | K2 device code | `device_code` in the body of `device.token` | device request |
+| `public` | none | — | none (rate class `public_strict`) |
+| `stripe-webhook` | Stripe signature | `Stripe-Signature` over the raw body, verified with the sealed webhook secret | Stripe |
+
+Rules:
+- P1 (CORE §2): the Clerk token is accepted only on `browser` rows, only through the gateway. No row accepts a person credential and an agent credential. No agent credential (K4/K5) is accepted by any Portal row: agents talk to the bridge, never to Core (except the device flow, which carries no person credential).
+- Owner native session (K3) may call only `GET` rows, `drafts.*` rows, and `owner_sessions.logout` (sign-out revokes server side). Every other mutation reaches Core from the CLI/TBD only as a draft step applied in the browser. Enforced at compile time (`InvariantOwnerCli`, `InvariantConfirm`, `InvariantOwnerCliNoSecrets` in routes.ts) and at run time by the router.
+- K3 never carries a code, ticket or token in any output it can read (S1): no K3-reachable output is a `SecretBearingSchema` or has a top-level `code|ticket|device_code|user_code|access_token|session_token` field (compile-time check). K3 never obtains any K11 (B4): `tickets.launch` and `tickets.keys` are browser-only; TBD opens Portal launches in the system browser (K1). K3 idle timeout 24 h (`OwnerSession.idleExpiresAt`). Boundary: the OS user — a K3 on a machine where agents share the OS user is reachable by them through `tealbrick`, which is why K3 is harmless by construction (reads + drafts, no secrets) (CLI.md: keychain ACL with user presence, login warning when agent items exist).
+- Workspace scoping: every `{ws}` path checks `ws.account = principal.account`; a foreign or unknown id → `404 not_found` (no existence leak). Licence ids, order ids, draft ids and session ids are checked the same way.
+
+### 1.3 Row fields (see `RouteOp`)
+| Field | Meaning |
+|---|---|
+| `opId` | `<area>.<verb>`, unique, stable; used by drafts, audit, CLI, generated client |
+| `method`, `path` | `{name}` segments bind to the same-named input field |
+| `auth[]` | allowed auth classes (§1.2) |
+| `exposure` | `gateway` or `internal`; nothing else |
+| `transport` | `json` (256 KB body, 15 s), `json_slow` (120 s: provider calls), `sse`, `longpoll` (75 s), `raw` (raw body kept for signature), `binary` (zip) — numbers in `TRANSPORTS` |
+| `query[]` | allowed query keys; the gateway drops all others |
+| `input`/`output` | name of an interface in routes.ts (`SchemaMap` makes a typo a type error). Input is flat: path params + query (GET) or body. JSON Schema for runtime validation is generated from these interfaces at freeze (`@opt2-tealbrick/spec`). |
+| `rate` | rate class (`RATE_CLASSES`); the gateway and Core both apply it; `429 rate_limited` + `Retry-After` |
+| `bodyLog` | `none` (no body content ever logged: codes, tokens, tickets, bridge documents, Stripe) or `meta` (field names + sizes only). Bodies are never logged verbatim; GlitchTip scrubbing uses the same rule. |
+| `audit` | action id from `AUDIT_ACTIONS`, or null for reads |
+| `draftable` | may appear as a draft step |
+| `confirm` | shown as a confirm item in draft review (deploy, grants/edges, policy, money, agent create/revoke, licence moves); the one apply confirmation covers them all. A direct browser call is itself the owner's action; the GUI shows its own confirm dialog for these. |
+| `idempotent` | `Idempotency-Key` header required |
+| `registry` | the one registry module that handles the op (§2) |
+
+### 1.4 Errors
+One envelope everywhere (CORE §8): `{ "error": { "code": "<snake_case>", "message": "...", "requestId": "...", "details"?: {…} } }` (`details` optional, e.g. `revision_conflict` carries `{currentRevision}`; `drafts.*` errors carry step issues). `message` is user-safe text the GUI may show. Codes are the `ErrorCode` union in routes.ts. Status mapping:
+
+| Status | Codes |
+|---|---|
+| 400 | `bad_request`, `validation_failed`, `idempotency_key_required`, `draft_invalid`, `draft_op_not_draftable`, `draft_ref_invalid`, `draft_ref_money`, `recipe_not_portable`, `policy_invalid`, `authorization_pending`, `slow_down`, `access_denied`, `expired_token` (RFC 8628 codes, carried as `error.code`) |
+| 401 | `unauthenticated`, `bridge_key_revoked`, `enrolment_code_invalid`, `stripe_signature_invalid` |
+| 402 | `licence_required` |
+| 403 | `forbidden` (wrong auth class for the row) |
+| 404 | `not_found` |
+| 409 | `conflict`, `revision_conflict`, `idempotency_conflict`, `licence_already_assigned`, `licence_not_active`, `workspace_paused`, `workspace_standalone`, `workspace_not_empty`, `bridge_not_ready`, `destination_in_use`, `deploy_in_progress`, `instance_exists`, `draft_state` |
+| 413 / 429 | `payload_too_large` / `rate_limited` |
+| 422 | `manifest_invalid`, `release_not_deployable`, `offer_unavailable` |
+| 502 / 504 | `provider_unavailable`, `provider_reauth_required`, `provider_not_linked` (409 when no link), `checkout_failed` / `upstream_timeout` |
+| 500 | `internal` |
+
+### 1.5 Ids, paging, idempotency, revisions, streams
+- Ids: CORE §1 prefixed ULIDs. Including `osn` (owner native session) and `lnk` (provider link). Product ids are manifest slugs. Provider destinations keep the provider's own id (opaque string).
+- Paging: list rows that can grow take `cursor` + `limit` (default 50, max 200) and return `Page<T> = {items, nextCursor|null}`. Cursors are opaque. Short bounded lists (providers, harness options, hooks, connections, sessions) return `{items}`.
+- Idempotency: rows with `idempotent: true` require `Idempotency-Key` (16–64 chars `[A-Za-z0-9_-]`). Core keeps `(principal, opId, key) → (input digest, response)` for 24 h. Same key + same input → the stored response; same key + different input → `409 idempotency_conflict` (same semantics as the SDK, CORE §13). Responses of `bodyLog: none` rows are never stored, so those rows are never `idempotent` (B8; `InvariantIdempotencyNoSecrets`, `InvariantSecretOutputs`): a one-time code never sits in the idempotency store.
+- Revisions: `canvas.save`, `agents.policy_set` and `drafts.update`/`drafts.apply` carry the `revision` the client read; a stale value → `409 revision_conflict`; the client re-reads and re-applies (the GUI ports v1's rebase-on-conflict logic). `details.currentRevision` tells the client what to re-read.
+- Config revisions: every op that changes what a bridge must enforce (edges, policy, pause, licence, connection/agent revoke, hooks, skills) bumps the workspace config revision in the same transaction and returns it (`configRevision`) where useful; the long-poll wakes at once (CORE §13 C9).
+- SSE (`instances.progress`): `text/event-stream`; events `phase`, `log`, `done`, `error` (`DeployProgressEvent`); heartbeat comment every 15 s; `Last-Event-ID` resumes; the stream closes after `done`/`error` or 15 min. Core re-checks ownership on every tick, polls the provider adapter (2 s, backing off to 10 s), and passes logs through a redactor (enrolment codes and any value Core set as an env value are masked). Nothing from the stream is persisted except the deploy state.
+- Long-poll (`bridge_api.config`): `after=<revision>&wait=<0..60>`; returns `200 application/jose` (the config JWS itself; slices inside `apps[].slice`) as soon as a newer revision exists, or `304` when `wait` elapses (C9).
+
+## 2. The 15 registries (PRD §7.1) — one owner module, one record kind each
+No registry stores a fact another registry owns; reads across registries go through the owner module. Product ids appear only as data. Note (N10): three registries own a child record kind besides their main one — Workspace (+ Account), Entitlement (+ Order), Consent (+ Draft). Each child exists only for its parent registry and no other module writes it; accepted for opt2 instead of three more registries.
+
+| # | Registry (`registry`) | Owner module | Record kind | Key fields | Written by |
+|---|---|---|---|---|---|
+| 1 | Product (`product`) | `products` | Product | product id, kind `app\|bridge\|desktop`, name, current release per channel | release sync only (no route); `catalog.list` reads |
+| 2 | Release (`release`) | `releases` | Release | `rel` id, product, version, channel `stable\|dev`, manifest digest + URL, image `ref@sha256`, artifact `{url, sha256}`, `upgradeFrom` (semver range), signature `kid` | release sync only; `releases.list`, `downloads.desktop` read |
+| 3 | Manifest Store (`manifest`) | `manifests` | StoredManifest | release id, manifest digest, verbatim manifest JSON | release sync only |
+| 4 | Offer (`offer`) | `offers` | Offer | `off` id, kind `single\|bundle`, products[], major, Stripe price id, amount, currency, tax behaviour, livemode, `verifiedAt` | offer sync only; `offers.list`, catalog read |
+| 5 | Entitlement Ledger (`entitlement`) | `entitlements` | Licence (+ Order) | `lic` id, account, product, major, status, offer, order, assignment `{ws, assignedAt}\|null`, livemode | `licences.assign/unassign/move`, `checkout.create`, `stripe.webhook` |
+| 6 | Workspace + Canvas Store (`workspace`) | `workspaces` | Workspace (canvas, edges, hook settings, skill overrides as children) | `ws` id, account, name, status, channel, infrastructure `{provider, destinationId}`, canvas revision + nodes, `edg` edges, hook enable flags, skill overrides; also the account row (`acc`/`per` ↔ Clerk user id) | `account.*`, `workspaces.*`, `canvas.save`, `edges.*`, `hooks.set`, `skills.override_*` |
+| 7 | Agent Registry (`agent`) | `agents` | AgentCard (+ harness option data rows) | `agt` id, ws, name, purpose, harness option id, display-only `endpointLabel`, `createdBy owner\|app`, tombstone | `agents.create` (the ONE create path), `agents.update`, `agents.delete`; harness rows are seeded data |
+| 8 | Agent Policy (`agent_policy`) | `policy` | AgentPolicy (+ workspace pause flag) | agent, revision, mode `free\|bound`, held families, caps, workflow ops, paused | `agents.policy_set`, `agents.pause/resume`, `workspaces.pause/resume` |
+| 9 | Connection Registry (`connection`) | `connections` | AgentConnection | `con` id, agent, method `key\|pairing`, verifier (public key or pairing `jti`), client name, created, last seen, revoked | `device.approve` (key), `bridge_api.ack` (pairing), `connections.revoke`, `agents.delete` |
+| 10 | Instance Registry (`instance`) | `instances` | Instance (deployment + registration in ONE record; `kind app\|bridge`) | `ins`/`brg` id, ws, product, release id, non-secret settings, provider refs (project, environment, service, volume ids), deploy state, claim state, instance (or bridge) public key, enrolment-code digest, health, last seen, key presence (bridge only), standalone flag | `instances.*`, `bridge_api.enrol/ack`, `workspaces.standalone` |
+| 11 | Provider Registry (`provider`) | `providers` | ProviderLink (account level) + adapters | `lnk` id, account, provider key, method `oauth\|token`, sealed credential, account label, status | `providers.link_*`, `providers.destinations_create` |
+| 12 | Credential Registry (`credential`) | `credentials` | CredentialRow (one table, `kind` column = CREDENTIALS kind) | kind, subject, digest (codes/opaque tokens) or `jti` (signed tokens), audience, expiry, used/revoked; sealed Portal signing keys | `device.*`, `agents.pairing_code`, `pairing.approve`, `bridge.enrolment_code`, `instances.register_own_infra`, `tickets.*`, `owner_sessions.*` |
+| 13 | Consent Registry (`consent`) | `consent` | ConsentRecord + Draft | request subject (`drf`/`dev`/pairing jti), kind `draft_apply\|device_approval\|connect_approval`, requested by, decided by, decision, receipt `rcp` (digest of steps + results) | `drafts.*`, `device.approve/deny`, `pairing.approve` |
+| 14 | Route Registry (`route`) | `routes` | RouteOp | this table (`ROUTES`), digest | build time only; `routes.list` reads |
+| 15 | Audit Log (`audit`) | `audit` | AuditEvent | `aud` id, at, actor, action (`AUDIT_ACTIONS`), ws, subject, draft id, outcome, request id | every row with `audit ≠ null` (written by the router after the handler commits) |
+
+### 2.1 Registry rules
+- **Release Registry.** Releases are not in the Core image. Lead · Platform publishes a signed release index (Ed25519 JWS over JCS, key pinned in Core configuration as a public value) from `opt2-tealbrick-platform`; Core's release sync fetches it, verifies the signature, fetches each manifest from its URL, checks `manifestDigest`, validates it with `@opt2-tealbrick/manifest` `validateManifest()`, and writes Product, Release and Manifest Store rows in one transaction. The bridge and the desktop app are releases in the same index (`kind bridge|desktop`). An instance points to a release id; "deployable" = latest release of the product on the workspace's channel whose `upgradeFrom` admits the current version.
+- **Manifest Store.** Verbatim JSON + digest. Core reads only fields MANIFEST.md lists for Core (discovery, settings, keys, scopes, operations, hooks, companions, skills, ui, runtime resources) through the manifest package; it never interprets product-specific values and holds no copy of vocabulary literals (CORE §7).
+- **Offer Registry.** Reviewed data shipped in the signed release index (`offers[]`, CORE I17), never environment variables. At sync Core verifies each Stripe price: active, one-time, amount and currency equal, `tax_behavior` set, `livemode` equals the Stripe key mode of the environment (opt2 = test). A failing offer is stored `available: false` and never offered. Channel is the release field; there is no channel switch elsewhere.
+- **Entitlement Ledger.** One licence kind. A bundle payment creates one licence per product (`fromBundle: true`). Licences belong to the account; unassigned licences sit on the account.
+  - `isEntitled(ws, product, major)` — the ONE function: true iff an `active` licence `L` exists with `L.product = product`, `L.major = major` and `L.assignment.ws = ws`. `major` is the major of the instance's release (for `instances.update`: of the target release). Used by: config builder (agent→app grants, companion grants, slice edge entries, hook activation), `tickets.launch`, `instances.update/rollback`, catalog overlay, `licences.unpaid`. Bridge and apps never check licences (CORE §6).
+  - `assign(lic, ws)`: refused with `409 licence_already_assigned` if `ws` already has another active licence for `(product, major)`; `409 licence_not_active` if the licence is not active. `unassign(lic)`: clears the assignment. `move(lic, ws)`: unassign + assign in one transaction by licence id. Every change bumps the config revision of each affected workspace; the old workspace loses grants at its next revision (≤ 60 s for an online bridge, CORE §13 C9); its instance keeps running (open-source app; no Portal tools for it).
+  - TODO(Martin): licence per major vs PRD "updates free while on licence" — a new major needs a new licence under this rule; until decided, state it in offer and website copy (N12).
+  - Refund or dispute (Stripe webhook) sets `refunded|disputed` → `isEntitled` false at the next config revision.
+- **Workspace + Canvas Store.** One revisioned canvas per workspace. Edge = `{kind, from, to.product, crud[], scopeType}` — CRUD plus one manifest-declared scope type, nothing else; `scopeSummary` is display-only text from the bridge ack (`tb.scope_summary`, CORE §13). Agent→app edges are created by the owner (`edges.create`); app→app edges (companions) are created by Core from manifest `companions[]` when both apps are deployed, with `crud` ⊆ the declared ceiling; the owner can only disable/enable them (`edges.update {enabled}`). One instance per product per workspace (CORE §1), so edges target a product id.
+- **Agent Registry.** One create path (`agents.create`, mode always `free`); `bound` cards are created by apps in a later wave through a consent request (Consent Registry kind reserved, no opt2 op). Audience format `tb:agt:<id>` (CORE §2) is derived, never stored. Harness options are data rows (seed migration), so the GUI owns no harness list.
+- **Agent Policy.** Values only: mode, held families, caps, workflow, paused. The vocabulary (`free|bound`, effects, hold families) and validation come from `@opt2-tealbrick/manifest`. `money` must be in `held` (`422 policy_invalid` otherwise) and has no cap. Caps shape (CORE I14): `{write?, outward?, destructive?: {max, per: hour|day}}`. Defaults for a new Free card: write 500/hour, outward 30/hour, destructive 20/day (destructive is also a default held family). No standing grants (C8). Each change bumps `revision` → grants re-minted with the new `polrev`.
+- **Connection Registry.** One row per agent connection, one verifier: `key` (K4 public key, from `device.approve`) or `pairing` (OAuth connector; pairing `jti`, reported by the bridge in `bridge_api.ack`; Core accepts it only if it issued that `jti` for that agent and bridge).
+- **Instance Registry.** Deployment and registration are one record. Registration: an app instance (or companion service) gets a K6 code in its deploy env; it enrols with the bridge; the bridge reports a claim `{kind, ins, service?, publicKey, manifestDigest, version, internalUrl?, codeDigest}` in `bridge_api.ack` (the raw code never travels to Portal); Core matches the code digest to the record, stores the key, and flips claim state to registered. A bridge registers itself with `bridge_api.enrol`. Re-enrolment replaces the bridge key; Core refuses the old key at once (`401 bridge_key_revoked`).
+- **Provider Registry.** One adapter interface, provider names only inside adapters: `linkStart`, `linkComplete`, `linkToken`, `verify`, `listDestinations`, `createDestination(name|random)`, `estimate(resources)`, `deploy(plan)`, `observe(refs, cursor)`, `update(refs, plan)`, `remove(refs)`. Railway adapter per C3: OAuth app (`workspace:admin offline_access`), refresh token sealed (AES-256-GCM) and rotated + re-sealed on every use; fallback pasted workspace token (sealed); no project tokens; one link per account serves many workspaces; destination chosen per workspace. Coolify adapter: stub, `available: false`, every method → `provider_unavailable`. Own infrastructure is not a deploy provider: own-infra bridge and neighbour enrolment are live under the GUI's "Advanced" panel (`bridge.enrolment_code`, `instances.register_own_infra`; CORE I16). Core writes no Portal credential into customer projects: the deploy env carries only the one-time K6 code and public values (`TB_PORTAL_KEYS`, Portal origin).
+- **Credential Registry.** The table behind CREDENTIALS.md: device requests (device code + user code as digests), owner native sessions (`tbo_` digest), pairing codes and tickets (issued `jti` + expiry), enrolment codes (digest, one-time, ≤ 24 h, target `bridge|instance`), Portal signing keys (sealed). Revocation is a row update plus a config revision.
+- **Consent Registry.** Generic request → decision → receipt. opt2 kinds: `draft_apply`, `device_approval`, `connect_approval` — Core-owned kinds, none product-named. App-originated requests (next wave, e.g. an app asking to create a bound agent) use kind `app_request` with vocabulary from the requesting app's manifest; no opt2 op.
+- **Audit Log.** Actions only from `AUDIT_ACTIONS`. Append-only. No code path reads audit rows to decide behaviour (state lives in the owning registry).
+
+## 3. Drafts and recipes (owner self-setup)
+- A draft = `{ws?, title, steps[]}`; each step `{opId, input}` where `opId` is a `DraftableOpId` (derived from `ROUTES` rows with `draftable: true`) and `input` validates against that op's input schema. Any string value may be `{"$ref": "#/steps/<n>/output/<json-pointer>"}` to an EARLIER step's output (CORE §13); a forward ref or a ref into a money step → `400 draft_ref_invalid` / `draft_ref_money`. ≤ 100 steps. JSON only (C11: no files).
+- Who: the owner native session creates/updates/validates/submits (`drafts.create/update/validate/submit`, `drafts.import`); `drafts.validate` (CORE I18, read-class, not draftable) checks every step against the route table and current state (ownership, licences, ids, `$ref`s) without applying and returns `{valid, revision, issues[]}`; `drafts.submit` returns `reviewUrl` (GUI page). Only a browser session can `drafts.apply` or `drafts.reject`.
+- States: `open → submitted → applying → applied | failed`; `rejected` from open/submitted. `drafts.update` is allowed in `open|submitted|failed`, bumps `revision`, and returns the draft to `open`.
+- Review: `drafts.get` returns each step with a Core-rendered one-line `summary`, `effect` (`write|destructive|money`), `confirm` flag (from the row), plus `confirmCount` and `requiresPurchase`. Inputs cannot contain secrets: no draftable op accepts a key value, token or code.
+- Apply (`drafts.apply {revision, confirm: true}`, `Idempotency-Key`): ONE owner confirmation covers every confirm step (deploy, edges, policy, money, agent create/revoke, licence moves). Steps run in order through the same handler as a direct browser call, as the browser principal, each with idempotency key `<drf>:<revision>:<n>` (re-applying after a fix never repeats a successful step). The first failure stops the run (`failed`, later steps `skipped`). Each executed step writes `draft.apply_step` audit rows with the draft id; the run writes one Consent record (`draft_apply`) with receipt `rcp`.
+- Money: a `checkout.create` step never charges. Apply creates the order (`assignTo` = the draft's workspace), marks the step `handed_off`, and returns `checkout: {orderIds, url}` where `url` opens the GUI pay-pill flow; payment then lands through `stripe.webhook`, which auto-assigns the new licence to `assignTo`.
+- Recipes: `drafts.export` → `Recipe {format: "tealbrick.recipe/1", title, description, steps}` with `ws` stripped from every step; any other concrete id that is not a `$ref` → `400 recipe_not_portable`. `drafts.import {ws?, recipe}` creates a new `open` draft (fills `ws`). Recipes for verticals are such JSON files; Core stores no recipe library (no env-var or vendored recipes).
+
+## 4. Op index (100 rows; details in `ROUTES`)
+Auth: B = browser, O = owner native session, pub = public, dev = device, brg = bridge, stripe = Stripe signature. Flags: D = draftable, C = confirm, I = Idempotency-Key. Paths are relative to `/api/v1` except `/internal/*` (Core private network only).
+
+| opId | Method + path | Auth | Flags | Registry |
+|---|---|---|---|---|
+| `account.me` | GET `/me` | B,O | - | workspace |
+| `account.set_current_workspace` | PUT `/me/current-workspace` | B | - | workspace |
+| `workspaces.list` | GET `/workspaces` | B,O | - | workspace |
+| `workspaces.create` | POST `/workspaces` | B | DI | workspace |
+| `workspaces.get` | GET `/workspaces/{ws}` | B,O | - | workspace |
+| `workspaces.update` | PATCH `/workspaces/{ws}` | B | D | workspace |
+| `workspaces.delete` | DELETE `/workspaces/{ws}` | B | - | workspace |
+| `workspaces.set_infrastructure` | PUT `/workspaces/{ws}/infrastructure` | B | DC | workspace |
+| `workspaces.cost_estimate` | GET `/workspaces/{ws}/cost-estimate` | B,O | - | provider |
+| `workspaces.pause` | POST `/workspaces/{ws}/pause` | B | - | agent_policy |
+| `workspaces.resume` | POST `/workspaces/{ws}/resume` | B | - | agent_policy |
+| `workspaces.standalone` | POST `/workspaces/{ws}/standalone` | B | - | instance |
+| `providers.list` | GET `/providers` | B,O | - | provider |
+| `providers.link_start` | POST `/providers/{provider}/link/start` | B | - | provider |
+| `providers.link_complete` | POST `/providers/{provider}/link/complete` | B | - | provider |
+| `providers.link_token` | POST `/providers/{provider}/link/token` | B | - | provider |
+| `providers.link_get` | GET `/providers/{provider}/link` | B,O | - | provider |
+| `providers.link_delete` | DELETE `/providers/{provider}/link` | B | - | provider |
+| `providers.destinations_list` | GET `/providers/{provider}/destinations` | B,O | - | provider |
+| `providers.destinations_create` | POST `/providers/{provider}/destinations` | B | DI | provider |
+| `harness.options` | GET `/harness-options` | B,O | - | agent |
+| `agents.list` | GET `/workspaces/{ws}/agents` | B,O | - | agent |
+| `agents.create` | POST `/workspaces/{ws}/agents` | B | DCI | agent |
+| `agents.get` | GET `/workspaces/{ws}/agents/{agt}` | B,O | - | agent |
+| `agents.update` | PATCH `/workspaces/{ws}/agents/{agt}` | B | D | agent |
+| `agents.delete` | DELETE `/workspaces/{ws}/agents/{agt}` | B | DC | agent |
+| `agents.instructions` | GET `/workspaces/{ws}/agents/{agt}/instructions` | B,O | - | agent |
+| `agents.pairing_code` | POST `/workspaces/{ws}/agents/{agt}/pairing-codes` | B | - | credential |
+| `pairing.connect_request` | GET `/pairing/connect-request` | B | - | credential |
+| `pairing.approve` | POST `/pairing/approve` | B | - | credential |
+| `agents.policy_get` | GET `/workspaces/{ws}/agents/{agt}/policy` | B,O | - | agent_policy |
+| `agents.policy_set` | PUT `/workspaces/{ws}/agents/{agt}/policy` | B | DC | agent_policy |
+| `agents.pause` | POST `/workspaces/{ws}/agents/{agt}/pause` | B | D | agent_policy |
+| `agents.resume` | POST `/workspaces/{ws}/agents/{agt}/resume` | B | DC | agent_policy |
+| `connections.list` | GET `/workspaces/{ws}/agents/{agt}/connections` | B,O | - | connection |
+| `connections.revoke` | DELETE `/workspaces/{ws}/agents/{agt}/connections/{con}` | B | DC | connection |
+| `device.start` | POST `/device/authorize` | pub | - | credential |
+| `device.token` | POST `/device/token` | dev | - | credential |
+| `device.lookup` | POST `/device/lookup` | B | - | credential |
+| `device.approve` | POST `/device/approve` | B | - | credential |
+| `device.deny` | POST `/device/deny` | B | - | credential |
+| `catalog.list` | GET `/catalog` | B,O | - | product |
+| `releases.list` | GET `/products/{product}/releases` | B,O | - | release |
+| `offers.list` | GET `/offers` | B,O | - | offer |
+| `canvas.get` | GET `/workspaces/{ws}/canvas` | B,O | - | workspace |
+| `canvas.save` | PUT `/workspaces/{ws}/canvas` | B | D | workspace |
+| `edges.create` | POST `/workspaces/{ws}/edges` | B | DCI | workspace |
+| `edges.update` | PATCH `/workspaces/{ws}/edges/{edg}` | B | DC | workspace |
+| `edges.delete` | DELETE `/workspaces/{ws}/edges/{edg}` | B | DC | workspace |
+| `hooks.list` | GET `/workspaces/{ws}/hooks` | B,O | - | workspace |
+| `hooks.set` | PATCH `/workspaces/{ws}/hooks/{ins}/{hookId}` | B | DC | workspace |
+| `instances.list` | GET `/workspaces/{ws}/instances` | B,O | - | instance |
+| `instances.deploy` | POST `/workspaces/{ws}/instances` | B | DCI | instance |
+| `instances.get` | GET `/workspaces/{ws}/instances/{ins}` | B,O | - | instance |
+| `instances.progress` | GET `/workspaces/{ws}/instances/{ins}/progress` | B,O | - | instance |
+| `instances.retry` | POST `/workspaces/{ws}/instances/{ins}/retry` | B | I | instance |
+| `instances.cancel` | POST `/workspaces/{ws}/instances/{ins}/cancel` | B | - | instance |
+| `instances.update` | POST `/workspaces/{ws}/instances/{ins}/update` | B | DCI | instance |
+| `instances.rollback` | POST `/workspaces/{ws}/instances/{ins}/rollback` | B | DCI | instance |
+| `instances.remove` | POST `/workspaces/{ws}/instances/{ins}/remove` | B | DC | instance |
+| `instances.register_own_infra` | POST `/workspaces/{ws}/instances/own-infra` | B | - | instance |
+| `bridge.get` | GET `/workspaces/{ws}/bridge` | B,O | - | instance |
+| `bridge.deploy` | POST `/workspaces/{ws}/bridge/deploy` | B | DCI | instance |
+| `bridge.progress` | GET `/workspaces/{ws}/bridge/progress` | B,O | - | instance |
+| `bridge.enrolment_code` | POST `/workspaces/{ws}/bridge/enrolment-code` | B | - | credential |
+| `keys.status` | GET `/workspaces/{ws}/keys` | B,O | - | instance |
+| `tickets.keys` | POST `/workspaces/{ws}/tickets/keys` | B | - | credential |
+| `tickets.launch` | POST `/workspaces/{ws}/tickets/launch` | B | - | credential |
+| `licences.list` | GET `/licences` | B,O | - | entitlement |
+| `licences.assign` | POST `/licences/{lic}/assign` | B | DC | entitlement |
+| `licences.unassign` | POST `/licences/{lic}/unassign` | B | DC | entitlement |
+| `licences.move` | POST `/licences/{lic}/move` | B | DC | entitlement |
+| `licences.unpaid` | GET `/workspaces/{ws}/unpaid` | B,O | - | entitlement |
+| `checkout.create` | POST `/checkout` | B | DCI | entitlement |
+| `checkout.get` | GET `/orders/{ord}` | B | - | entitlement |
+| `stripe.webhook` | POST `/stripe/webhook` | stripe | - | entitlement |
+| `skills.get` | GET `/workspaces/{ws}/skills` | B,O | - | workspace |
+| `skills.override_put` | PUT `/workspaces/{ws}/skills/overrides/{skillKey}` | B | D | workspace |
+| `skills.override_delete` | DELETE `/workspaces/{ws}/skills/overrides/{skillKey}` | B | D | workspace |
+| `skills.pack` | GET `/workspaces/{ws}/skills/pack` | B,O | - | workspace |
+| `downloads.desktop` | GET `/downloads/desktop` | B | - | release |
+| `owner_sessions.list` | GET `/owner-sessions` | B,O | - | credential |
+| `owner_sessions.revoke` | DELETE `/owner-sessions/{osn}` | B | - | credential |
+| `owner_sessions.logout` | POST `/owner-sessions/logout` | O | - | credential |
+| `drafts.list` | GET `/drafts` | B,O | - | consent |
+| `drafts.create` | POST `/drafts` | B,O | I | consent |
+| `drafts.get` | GET `/drafts/{drf}` | B,O | - | consent |
+| `drafts.update` | PUT `/drafts/{drf}` | B,O | - | consent |
+| `drafts.submit` | POST `/drafts/{drf}/submit` | B,O | - | consent |
+| `drafts.validate` | POST `/drafts/{drf}/validate` | B,O | - | consent |
+| `drafts.apply` | POST `/drafts/{drf}/apply` | B | CI | consent |
+| `drafts.reject` | POST `/drafts/{drf}/reject` | B | - | consent |
+| `drafts.export` | GET `/drafts/{drf}/recipe` | B,O | - | consent |
+| `drafts.import` | POST `/recipes/import` | B,O | I | consent |
+| `audit.list` | GET `/audit` | B,O | - | audit |
+| `bridge_api.enrol` | POST `/bridge/enrol` | pub | - | instance |
+| `bridge_api.config` | GET `/bridge/config` | brg | - | instance |
+| `bridge_api.ack` | POST `/bridge/ack` | brg | - | instance |
+| `routes.list` | GET `/internal/routes` | pub | - | route |
+| `system.health` | GET `/internal/health` | pub | - | route |
+## 5. Op semantics (what the table cannot say)
+
+### 5.1 Account, workspaces, onboarding
+- `account.me` creates the account + person row on first call from the Clerk user id (no Clerk webhook row exists). `firstSignIn = true` while the account has no workspace → GUI shows "new here, create workspace".
+- `workspaces.get` returns derived `onboarding` flags (infrastructure linked, agent added, agent authorised, app placed); the overlay needs no extra op. `workspaces.delete` → `409 workspace_not_empty` while instances exist. A standalone workspace is read-only in Portal (`409 workspace_standalone` on every mutation).
+- `workspaces.pause` is the workspace kill switch: sets the pause flag, bumps the config revision; the bridge refuses every agent and app→app call at its next revision (CREDENTIALS pause matrix). Not draftable (immediate, browser only).
+- `workspaces.standalone {confirmName, ownerKey}` (type the workspace name; paste the public owner key from `tealbrick standalone owner-key`, CREDENTIALS §17): Core signs a final config naming `standalone = {issuer: tb:brg:<id>, kid, ownerKeys: [ownerKey]}` (CORE §4) with `portalKeys` emptied; afterwards Core mints nothing for this workspace. Licences stay on the account and can be moved.
+
+### 5.2 Infrastructure (provider link per account, destination per workspace)
+`providers.list` (Railway available; Coolify `available: false`) → `providers.link_start` (`authorizeUrl` + referral `signupUrl`, `state` bound to the session) → Railway redirects the browser to a GUI page that calls `providers.link_complete {code, state}` (there is no Core callback path) → or fallback `providers.link_token` → `providers.link_get` (verify: linked, account label, status) → `providers.destinations_list` / `providers.destinations_create {name}|{random:true}` (Core generates the random name) → `workspaces.set_infrastructure`. `workspaces.cost_estimate?products=` sums the adapter estimate of each product's manifest `runtime` resources (+ the bridge if not deployed) with a dated basis; the catalog carries the same estimate per entry.
+
+### 5.3 Agents and connections
+- `harness.options` rows (EXAMPLE data, not code) drive "I have an agent" (desktop: TBD, Claude Desktop, Codex desktop; agentic system: Eve; other via URL; `endpointLabel` on the card is display-only, N8) and "I do not have an agent" (`noAgentPath` → `downloads.desktop`). `authorise`: `device_approval` (key connection: TBD, CLI agent mode, kits), `instruction_set` (OAuth connector: Claude Desktop / Codex desktop), `url` (generic MCP harness: MCP URL + pairing code).
+- Key connection (CORE §9; wire = `DeviceStartAgentInput`, `DeviceAgentTokenResult`): the agent machine calls `device.start {scope: "agent", client_id, machine_label, harness, agents: [{agt?, public_key}] (1..64, S4)}` → the owner opens `verification_uri_complete` (or types the user code) → `device.lookup {userCode}` returns that ONE request (no unfiltered list, no clear user code; B2) → agent approval screen: pick the workspace and one agent card per key → `device.approve {userCode, ws, agents: [{index, agt}]}` (digest match; 5 wrong codes per 10 min per account) → Core writes one Connection row per pair (`method key`) and one Consent record; the next config carries them → the `device.token` poll returns `DeviceAgentTokenResult` (connections, `mcp_url`, `token_endpoint`; no token: each agent signs a K4 assertion at the bridge). One request + one click covers 15–16 agents on one machine (J3). TBD's agent uses exactly this path.
+- OAuth connector, two equal routes (C4): (a) copy-paste: `agents.instructions` renders steps with `{{pairingCode}}` and `agents.pairing_code` fills it; (b) "Approve in Portal": the bridge's authorize page form-POSTs the browser to the GUI page `https://<portal>/pair` with a pairing state proof (`tb-pair-state+jwt`, K7-signed: request id `rid`, return URL `<bridge>/oauth/pair/callback`, `aud tb:portal`, ≤ 600 s; BRIDGE §6.2, CREDENTIALS); the GUI calls `pairing.connect_request` (Core verifies the signature with the stored bridge key and checks that the bridge's workspace belongs to the caller's account, else `404` — these paths have no `{ws}`; S3), the screen shows the `redirectHost` and the client name marked "unverified" (S3), the owner picks a card (or creates one first with `agents.create`), `pairing.approve {state, agt}` mints a fresh K2b and returns a `FormPostRedirect` (`code` in the form body, never in a URL) the GUI auto-submits to the bridge callback; no bridge→Portal server call. Either way the bridge redeems the code offline and reports the new `con` in its next ack.
+- `agents.delete` revokes every connection of the card, drops its edges and grants at the next config revision, tombstones the card. `connections.revoke` drops one connection.
+- `agents.policy_set` (mode, held, caps, workflow) and `agents.pause/resume` bump policy revision + config revision.
+
+### 5.4 Owner native session (owner CLI and TBD human sign-in)
+`device.start` with `DeviceStartOwnerInput {scope: "owner", client_id: "tealbrick-cli"|"tbd", machine_label}` (no key; `kit` can never ask for `owner` — B3; Core refuses any other combination) → `device.lookup {userCode}` → the OWNER approval screen (different from the agent screen) says "this signs in a tool AS YOU — never approve for an agent" → `device.approve {userCode}` → `device.token` returns `DeviceOwnerTokenResult` (`tbo_` K3, idle 24 h). Same limits for both clients: reads + `drafts.*` + `owner_sessions.logout`. `owner_sessions.list` shows client kind; `owner_sessions.revoke` (browser) or `owner_sessions.logout` (self) revoke server side at once. Agents keep working: no agent credential derives from K3 (CORE §9).
+
+### 5.5 Catalog, canvas, deploy (licence is the LAST step — R4)
+- `catalog.list[?ws=]` returns every deployable app built only from Product + Release + Manifest + Offer rows (no app list anywhere else): slug, name, category, summary, description, icon (manifest `svgPath`/`viewBox`, validated by the manifest schema), intents + keywords (GUI search index; GUI adds its own action intents), release, operations (id, title, crud, effect), offers (with `taxNote` "tax added at checkout"), `deploySteps` from manifest `settings.steps` (fields with choices, e.g. engine) and key requirements WITHOUT values, scope types (labels for the canvas line), `hasConfigureUi` + `configurePath` (manifest `ui`), skill names, companions, cost estimate. With `ws`: overlay `licence none|unassigned_available|assigned`, `deployment absent|deploying|running|failed|needs_keys|update_available`, instance + release ids, `onCanvas`, `pendingHolds` (count only, from the bridge status report → canvas badge; double-click opens the app's holds; TBD shows the same counts; S2). The response `digest` lets the GUI cache it.
+- Canvas: `canvas.save` stores node placement (agents, placed apps, deployed or not) with `revision`. Edges and hooks have their own ops.
+- The bridge deploys at onboarding step 1 (B1): `workspaces.set_infrastructure` runs `bridge.deploy` as its last phase (K6 in the bridge env; progress on `bridge.progress`, SSE). `bridge.deploy` is also its own op (draftable, confirm) to redeploy a missing bridge. So the bridge exists before "add agent → authorise" and before any app popup asks for keys.
+- `instances.deploy {product, releaseId?, settings}` requires an online bridge (`409 bridge_not_ready`). Phases: provision → image → start → register (instance enrols via the bridge, reported in ack) → health → ready. Non-secret settings only; they reach the app only as env at (re)deploy, never in the slice (S6); key requirements are satisfied on the bridge key page.
+- Deploy does NOT require a licence. Unpaid state, exactly: the app may be deployed and the agent→app edge drawn while no licence is assigned; Core then mints NO grant, NO slice edge entry, NO launch ticket and activates NO hook for that app; the edge shows `grantState: "unlicensed"`; the overlay reports `licence: none` with `deployment: running`; `licences.unpaid` counts it → the GUI shows the glowing pay pill. `checkout.create` is the last deploy step; when `stripe.webhook` lands the payment, the licence is created and assigned (`assignTo`), and the next config revision carries the grants.
+- `instances.update {releaseId?, settings?}` (a settings change redeploys, S6) and `instances.rollback` require `isEntitled` (`402 licence_required`; updates are free while licensed). `instances.remove {deleteData}` (confirm; CORE I15): `deleteData: false` (default) stops the services and keeps volumes and backups; `true` also deletes them. Core never deletes customer data implicitly. The record goes `removed`; removing the last app does not remove the bridge.
+- `instances.get` / `instances.list` = status + health (from the bridge ack), `missingKeys`, `updateAvailable`, `licensed`. `bridge.get` shows bridge state (`absent|deploying|awaiting_enrolment|online|offline|standalone`), MCP URL, last seen, acked revision ("Portal reachable" lease is informational).
+- `hooks.list` / `hooks.set`: subscriptions resolved from deployed + licensed manifests; owner may disable each (CORE §13).
+- Own infrastructure: `instances.register_own_infra {product}` issues a K6 for one neighbour instance (shown once, with the env lines); `bridge.enrolment_code` issues a K6 for a bridge (first own-infra bridge, or re-enrolment).
+
+### 5.6 Keys and person tickets (no key value through Portal)
+- `keys.status`: per requirement name `{set: true|false|null}` from the latest bridge ack; `bridgeReady: false` until the bridge enrols (it deploys at onboarding step 1). The GUI labels source `account_default` as "workspace default keys" (N13: they live in each workspace's bridge, so a second workspace asks again).
+- `tickets.keys {names?, returnTo?}` → `{url, ticket, expiresAt}`: K11 `pur: keys`, `aud` = this bridge; `url` = the bridge key page (path owned by BRIDGE.md). `409 bridge_not_ready` before enrolment.
+- `tickets.launch {product, path?}` → K11 `pur: launch`, `aud` = the instance, url `https://<bridge>/a/<product>/tb/launch` (form POST, CORE §13). Requires `isEntitled` (`402`), instance running, bridge online.
+- No row accepts a key value. The only secret inputs any row takes are provider credentials Core itself needs (`providers.link_token`, OAuth `code`) — sealed at once, `bodyLog: none`.
+
+### 5.7 Commerce (Stripe TEST in opt2)
+`offers.list` → `checkout.create {offerId, ws?, returnPath}` (Stripe Checkout Session, mode `payment`, automatic tax so tax is added on top, `client_reference_id` = order id, idempotency key = order id) → `checkout.get` (poll after return) → `stripe.webhook` handles `checkout.session.completed|async_payment_succeeded` (verify session ↔ order: livemode, mode, reference, currency, amount; create licences, auto-assign to `assignTo` if free), `…async_payment_failed|expired` (order failed/expired), `charge.refunded|charge.dispute.created` (licence `refunded|disputed`). Events are de-duplicated by event id. `licences.unpaid` feeds the pay pill.
+
+### 5.8 Skills
+`skills.get[?agt=]` renders the workspace bundle from deployed apps' manifest skills + per-workspace overrides (`edited`, `generatedDigest`); with `agt`, agent variables are filled. `skills.override_put {body, baseDigest}` (`409 revision_conflict` if the generated file changed) / `skills.override_delete` (revert). `skills.pack` = zip of the same render. The bundle digest goes into the config; the bridge serves skills to MCP agents (BRIDGE.md).
+
+### 5.9 Bridge-facing rows (outbound only from the customer side)
+- Payload types are imported from `types/bridge.ts` (BRIDGE.md owns them, CORE I6): `EnrolRequest`, `EnrolResponse`, `ConfigPullQuery`, `StatusReport`. The raw K6 appears in exactly two places: the owner-facing issuance response (`EnrolmentCode`, shown once to paste into an env) and the bridge's own redemption body (`bridge_api.enrol`); acks and status reports carry digests only.
+- `bridge_api.enrol {code, publicKey, version, sdkMajors, form, publicOrigin}` → `{bridgeId, workspaceId, portalKeys, configPath, ackPath, waitMaxS: 60}`. Code one-time (digest match, ≤ 24 h). Portal key set travels only here, in deploy env, and in signed documents: there is no JWKS route.
+- `bridge_api.config?after&wait` → `200 application/jose` = the config JWS (`tb-config+jws`, instance slices inside `apps[].slice`), or `304`. Document shape: `workspace-config.schema.json`.
+- `bridge_api.ack` = `StatusReport`: applied `rev`, bridge identity/version, app states and health, key presence booleans, scope summaries (bridge op `scope_summary`), connections created (method `pairing`, with pairing `jti`) and revoked, claims (with `codeDigest`), rejection counters. Core answers `{accepted, configRevision}`; recorded connections and claims come back in the next config. Not audited per call (high volume); the registrations and connections it creates are (`instance.registered`, `connection.create`).
+
+## 6. Ops that must NOT exist (and are absent)
+| Must not exist | Why (PRD §7.2, BOUNDARIES §9, WEB rules) |
+|---|---|
+| Tool execution / forwarding (MCP `tools/call`, hosted MCP endpoint, "execute" of any connector) | Portal never sees a tool call; agents reach apps through the bridge |
+| Connector, channel or broker ops (third-party connector link/execute, MCP OAuth client, bot tokens, channel links, account connections) | Outside connectivity is an app's job (the connectivity miniapp), reached through the bridge |
+| Relay / local-exec / frames / hosted call queues | No tool traffic through Portal |
+| Fleet, teams, memberships, daemons, peers, admin/staff routes, invites, SSO, password login | No organisation plane, no self-hosted identity |
+| Rooms / sessions index / chat previews / chat tokens | Desktop is not a second control plane |
+| App data (partitions, areas, connected accounts, consents of apps, receipts, holds, approvals "waiting" view) | Apps own their data, holds and receipts |
+| Any op that accepts, returns or reveals an app key value (env reveal, apply-env, key upload) | Option B: keys live in the bridge key store |
+| Grant introspection / online grant check / grant redeem | Grants are verified locally (CORE §6) |
+| Generic passthrough prefixes, legacy aliases, version-negotiation headers | Default deny, one version |
+| JWKS / OpenID discovery for agents | No agent auth at Portal |
+| Agent-facing endpoints of any kind other than the device flow | Agents talk to the bridge |
+| Product-named routes (`/<product name>/*`) | Product ids are data |
+
+## 7. Coverage matrix (SPEC-REVIEW-CHECKLIST §3)
+| Journey line | Op id(s), or owner of a non-Portal step |
+|---|---|
+| **J1** Clerk sign-in (Google/GitHub); first sign-in "new here, create workspace"; create workspace | Clerk hosted sign-in (GUI, K1); `account.me` (`firstSignIn`); `workspaces.create`; `account.set_current_workspace` |
+| J1 Railway: authorise, verify, destination (existing / new name / random); Coolify listed disabled; bridge deployed | `providers.list` (Coolify `available:false`), `providers.link_start`, `providers.link_complete`, `providers.link_token`, `providers.link_get`, `providers.destinations_list`, `providers.destinations_create {name}\|{random}`, `workspaces.set_infrastructure` (runs `bridge.deploy`, progress `bridge.progress`), `workspaces.cost_estimate` |
+| J1 Add agent: "I have an agent" (TBD / Claude Desktop / Codex desktop; Eve / other via URL) and "I do not have an agent" (download TBD) | `harness.options` (`kind`, `authorise`, `noAgentPath`); `downloads.desktop` |
+| J1 Create agent card (name, purpose, harness, Free default); card on canvas | `agents.create` (mode `free`); `canvas.get`, `canvas.save` |
+| J1 Authorise agent: TBD device approval one click; Claude/Codex instruction set; connection credential issued | TBD: `device.start` (`scope agent`) → `device.lookup` → `device.approve` → `device.token` (needs the bridge from `bridge.deploy`); Claude/Codex: `agents.instructions` + `agents.pairing_code`, or `pairing.connect_request` + `pairing.approve`; connection row via `device.approve` / `bridge_api.ack`; K5 issued by the bridge (BRIDGE.md) |
+| J1 Catalog search by intent; drag app; tether agent→app (CRUD + scope) | `catalog.list` (intents, keywords; GUI builds the index); `canvas.save`; `edges.create {crud, scopeType}` |
+| J1 Deploy app: popup steps (keys, engine; next/previous), start, progress/status, verify; enrolment code to bridge | `catalog.list` (`deploySteps`, `keyRequirements`, `costEstimate`); `instances.deploy` (instance K6; bridge already deployed by `bridge.deploy`); `instances.progress` (SSE); `instances.get`; `instances.retry`, `instances.cancel`; `bridge.get` |
+| J1 Key entry: Portal issues only a link/ticket to the bridge page; no op accepts a key value | `keys.status` (booleans); `tickets.keys`; §5.6, §6 |
+| J1 Licence: Stripe checkout last deploy step; status; pay pill; glow while unpaid; assign | `offers.list`, `checkout.create`, `checkout.get`, `stripe.webhook`, `licences.unpaid`, `licences.list`, `licences.assign`; §5.5 R4 |
+| J1 Double-click app: launch ticket via bridge; scope summary on canvas line | `tickets.launch`; `canvas.get` (`edge.scopeSummary` from `bridge_api.ack`); scopes edited in the app (SDK-API, app op) |
+| J1 Skills bundle: dynamic build, view; bridge pushes to MCP agents | `skills.get`; push = bridge (BRIDGE.md, MCP resources) |
+| J1 Connect in-app: Gmail one button, several inboxes, tiers, "as me"/"as itself" | app/bridge ops, not Portal — Connect manifest + SDK-API (scopes, `publicRoutes`), BRIDGE.md (`/p/<product>/…`, `/a/<product>/…`) |
+| **J2** List/switch workspaces; one Railway authorisation reused; Railway link per workspace | `workspaces.list`, `account.set_current_workspace`; `providers.link_get` (`workspacesUsing`); `workspaces.set_infrastructure` per workspace |
+| J2 Agents list; bound to one workspace; edit card | `agents.list`, `agents.get`, `agents.update` (agents live under `/workspaces/{ws}`; no cross-workspace op) |
+| J2 Licences: list; buy single or bundle; assign; move; unassign | `licences.list`, `offers.list` (`kind single\|bundle`), `checkout.create`, `licences.assign`, `licences.move`, `licences.unassign` |
+| J2 Skills: edit; download pack; pair more machines (five Mac minis) | `skills.override_put`, `skills.override_delete`, `skills.pack`; more connections on one card: one `device.start/lookup/approve` per machine (up to 64 keys each) or `agents.pairing_code` per OAuth connector; `connections.list` |
+| J2 Policy: Free/Bound; held families; pause/resume agent; kill switch; revoke agent or key | `agents.policy_get`, `agents.policy_set`, `agents.pause`, `agents.resume`, `workspaces.pause`, `workspaces.resume`, `agents.delete`, `connections.revoke` |
+| J2 Download TBD (signed in); app update; app health/status | `downloads.desktop`; `releases.list`, `instances.update`, `instances.rollback`; `instances.get`, `instances.list`, `hooks.list` |
+| J2 Leave Portal: bridge becomes standalone issuer | `workspaces.standalone`; switch itself = BRIDGE.md §Standalone |
+| **J3** CLI install, person device sign-in, pick workspace; local bridge; write harness MCP config | `device.start {scope: "owner"}` → `device.lookup` → `device.approve` → `device.token`; `workspaces.list`; local bridge and harness config = CLI.md / BRIDGE.md (no Portal op) |
+| J3 Register agent cards from the CLI (15–16), own identity each; per-agent + shared area edges | draft steps `agents.create` ×N + `edges.create` ×N (`drafts.create` → `drafts.apply`); identities = ONE `device.start {scope: "agent", agents: [16 keys]}` + one approval (S4); areas are app scopes (Knowledge, SDK-API) |
+| J3 Client Railway per workspace; bridge beside own-infra apps (enrolment code); Buzz identity per agent | `providers.*`, `workspaces.set_infrastructure`; `bridge.enrolment_code`, `instances.register_own_infra`, `bridge_api.enrol`, `bridge_api.ack`; Buzz identity = Connect app op |
+| **Owner self-setup** CLI person sign-in (device flow, browser approval); operator session builds a draft | `device.start/approve/token` (`scope: "owner"`); `drafts.create`, `drafts.update`, `drafts.validate`, `drafts.get`, `drafts.list`, `drafts.submit`; reads for context (`catalog.list`, `agents.list`, …) |
+| Self-setup: review on website; apply with one confirmation (deploy, grants, money); export/import recipe | `drafts.get` (summaries, confirm items), `drafts.apply`, `drafts.reject`; checkout handoff; `drafts.export`, `drafts.import` |
+| Self-setup: revoke CLI session; agents keep working | `owner_sessions.revoke` / `owner_sessions.logout`; agents unaffected (CORE §9; CONFORMANCE case) |
+
+## 8. REQUESTS.md → op / §
+| Request (REQUESTS.md) | Answer here |
+|---|---|
+| portal-core: route registry machine-readable | `types/routes.ts` (`RouteOp`, `ROUTES`, typed inputs/outputs, `SchemaMap`); `routes.list` at `/internal/routes`; §1.1. Requested fields map: `auth` (§1.2; `agent-device` → `device`), `exposure` (`gateway\|internal`, default deny), `audit`, `draftable`, `confirm`, `idempotent`, `rate`, plus `bodyLog`, `transport`, `query`, `registry`. |
+| …confirm bridge enrol/config, CLI device flow, TBD device approval, Stripe webhook reach Core through the gateway as explicit rows | Yes: `bridge_api.enrol/config/ack`, `device.start/token` (+ browser `device.*`), `stripe.webhook` — §1.1 explicit public rows. Conventions §1.4–1.5 (envelope, cursor, ids: CORE §1 prefixes, not `ag_`/`in_`). |
+| portal-core: one grant format, in signed config | CORE §6 (12 h, half-life re-mint, bridge attaches); Core mints from `isEntitled` + edges + policy (§2.1); no grant route (§6 table). |
+| portal-core: bridge enrolment + config shape | `bridge_api.enrol`, `bridge_api.config` (long-poll 60 s), `bridge_api.ack` (health, key presence, scope summaries, connections, registrations); neighbour binding via K6 per instance (§2.1 Instance Registry, `instances.register_own_infra`). Document schema = BRIDGE.md. |
+| portal-core: agent card credential per harness | §5.3: key connections via device flow (`device.*`, K4 registered); OAuth connectors via K2b (`agents.pairing_code`, `pairing.*`); Core mints no agent token. |
+| portal-core: owner CLI device flow + drafts/apply | §5.4 (`scope: "owner"`; reads + `drafts.*` only), §3 (steps, `$ref`, apply, stop at first failure, per-step audit); recipes = exported drafts. |
+| portal-core: manifest fields Core reads | §2.1 Manifest Store (via `@opt2-tealbrick/manifest`); `discovery.intents` delivered by `catalog.list`. |
+| portal-core: release registry contract | §2.1 Release Registry (signed index from `opt2-tealbrick-platform`, bridge + desktop as releases); `releases.list`. Index format = REPOS.md / Platform. |
+| portal-core: Railway link model | C3; §2.1 Provider Registry; §5.2 ops `providers.link_start/complete/token/get/delete`, `destinations_list/create`, `workspaces.cost_estimate`; deploy/update/rollback/status = `instances.*`. |
+| portal-core: launch tickets + key-entry links | `tickets.launch`, `tickets.keys` (K11 `pur`), `keys.status`; §5.6. |
+| portal-core: skills bundle | `skills.get/override_put/override_delete/pack`; overrides per workspace (CORE §13); §5.8. |
+| portal-gui: catalog shape | `catalog.list[?ws=]` = `Catalog`/`CatalogEntry` incl. overlay (§5.5); no product names in Core/GUI code. |
+| portal-gui: search intents | `CatalogEntry.intents/keywords` from manifest `discovery`; GUI adds action intents. |
+| portal-gui: launch tickets; key status booleans; before bridge enrolled | `tickets.launch`, `tickets.keys`, `keys.status` (`bridgeReady`); order: infra + bridge (`bridge.deploy` at onboarding step 1) → agent → app deploy → key entry → licence (§5.5). |
+| portal-gui: draft review + one-click apply + revoke CLI session | `drafts.list/get/validate/apply/reject` (`DraftStepView.summary/effect/confirm`, `requiresPurchase`), `owner_sessions.list/revoke`; money → checkout handoff (§3). |
+| portal-gui: onboarding | `workspaces.create`, `providers.*` (`signupUrl`, `random`), `providers.list` (`available:false`). |
+| portal-gui: agents | `harness.options`, `agents.create`, `device.lookup/approve/deny`, `agents.instructions`, `agents.pairing_code`, `pairing.*`, `AgentCard.status pending\|authorised\|connected\|paused`. |
+| portal-gui: canvas | `canvas.get/save` (`revision`, `409 revision_conflict`), `edges.create/update/delete` (CRUD + scope type, `scopeSummary`), companions = manifest-derived app→app edges (§2.1). |
+| portal-gui: deploy | `instances.deploy`, `instances.progress` (SSE phase/log/done/error), `instances.retry/cancel`; stable error codes + user-safe `message` (§1.4). |
+| portal-gui: licences | `licences.list/assign/unassign/move`, `checkout.create` (Stripe TEST URL + return path), `checkout.get`, `licences.unpaid`. |
+| portal-gui: skills | `skills.get` (`path, title, body, sourceProduct, edited`), `skills.override_put/delete`, `skills.pack`. |
+| portal-gui: downloads | `downloads.desktop` (version, signed URL, sha256, notarized). |
+| portal-gui: gateway route export; endpoint name; cache at boot | `GET /internal/routes` (method, path, auth, transport → body cap + timeout, query keys, rate); GUI caches by digest (`TB-Routes-Digest`). |
+| Coordinator R2 / R3 / R4 | R2 §5.4 (`client: cli\|tbd`, sessions list shows client); R3 `pairing.connect_request` + `pairing.approve` + `agents.pairing_code` (§5.3); R4 §5.5 unpaid rules. |
+
+## Checklist mapping (SPEC-REVIEW-CHECKLIST §1 PORTAL-API)
+| Checklist line | Answered in |
+|---|---|
+| One row per op: id, path, method, exposure, caller type, rate class, body-log; generates gateway, client, CLI, rate limits | §1.1, §1.3, `RouteOp`/`ROUTES` |
+| Every GUI action of PRD §7.3/§10 is a typed op, same path for GUI, CLI, recipes | §4, §7, §3 (drafts call the same handlers) |
+| Default-deny; Core only from gateway; no passthrough; no "safe because not forwarded" | §1.1 |
+| Core JSON only; no UI, static assets, self-hosted identity | §1.1, §1.2, §6 |
+| 15 registries, one owner module, one record kind, Instance = deployment + registration | §2, §2.1 |
+| Catalog op returns slug, name, category, description, operations, settings route, release state, offers; GUI owns no list | §5.5, `CatalogEntry` |
+| Release Registry signed, outside image, product/version/digest/artifact/channel/upgrade rule; deployment → release id | §2, §2.1 |
+| One `isEntitled(workspace, product, major)`; reassignment by licence id | §2.1 Entitlement Ledger |
+| Offers reviewed data verified against Stripe, not env; channel a field | §2.1 Offer Registry |
+| Provider Registry one interface, Railway adapter, Coolify stub greyed; names only in adapters | §2.1 Provider Registry, §5.2 |
+| Consent Registry generic; manifest vocabulary; no product-named kinds | §2.1 Consent Registry |
+| No op for tool execution, connectors/channels/brokers, relay/local-exec, Fleet, rooms, app data | §6 |
+| Settings/key ops never carry key values | §5.6, `KeyRequirement`, §6 |
+| Draft ops typed; apply needs browser confirmation | §3, `DraftableOpId`, compile-time checks RT1–RT3 (routes.ts) |
+| (v0 review) codes stored as digests; K3 outputs carry no secrets | §1.2, §1.5, compile-time checks RT6–RT8 (routes.ts) |
+| Audit action registry; no behaviour from audit rows; no env-var registries | `AUDIT_ACTIONS`, §2.1 Audit Log, Offer/Release rules, §3 recipes |
+| No home-infra or personal constants | §1.1 |
+| §3 coverage lines (J1, J2, J3, owner self-setup) | §7 (J1 authorise after `bridge.deploy`: B1; J3 one approval for 16 agents: S4) |
+
+## Open questions
+1. **Licence per major** (N12, waits on Martin): `isEntitled(ws, product, major)` means a new major needs a new licence, while PRD §1 says "updates free while on licence". Recommendation: keep per-major licences (one licence kind, no version deciders) and say so in offer and website copy; Martin decides (TODO in §2.1).
+
+Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairing` (I7), own-infra enrolment live (I16), caps shape (I14), device-poll errors in our envelope (C15), instance removal (I15), offers in the signed release index (C17), device-flow path and wire (B6: this file + routes.ts are the source).

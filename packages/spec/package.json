@@ -1,0 +1,29 @@
+{
+  "name": "@opt2-tealbrick/spec",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Teal Brick opt2 frozen interface contract: JSON Schemas, TypeScript types, route table, vocabularies (data only).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./manifest": { "types": "./dist/manifest.d.ts", "default": "./dist/manifest.js" },
+    "./credentials": { "types": "./dist/credentials.d.ts", "default": "./dist/credentials.js" },
+    "./bridge": { "types": "./dist/bridge.d.ts", "default": "./dist/bridge.js" },
+    "./routes": { "types": "./dist/routes.d.ts", "default": "./dist/routes.js" },
+    "./sdk": { "types": "./dist/sdk.d.ts", "default": "./dist/sdk.js" },
+    "./schemas/*": "./schemas/*",
+    "./examples/*": "./examples/*"
+  },
+  "files": ["dist", "schemas", "examples"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "node --test 'test/**/*.test.ts'"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  }
+}

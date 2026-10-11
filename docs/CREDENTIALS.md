@@ -1,0 +1,280 @@
+# opt2 specs — CREDENTIALS (credential registry)
+
+Status: v0.1, Lead · Specs, 2026-10-11. Obeys CORE.md (§2–§10, §12–§14, C1–C17, I1–I18). Machine-readable twin: `types/credentials.ts` (claim sets, `typ` constants, registry table). Markdown and `.ts` disagree → the `.ts` wins and this file is a spec bug.
+
+Scope: every credential and proof in opt2 — who issues it, with which key, who holds it, how it is stored, its exact claims, lifetime, audience rule, verifier and check order, revocation, and pause behaviour. Also: identifiers, the one grant, key management (sealing, rotation, compromise), the revocation matrix, the pause matrix, hard rules with conformance cases, owner CLI / TBD identities, device flow, pairing code, standalone handover, key custody and the external credentials Core holds. Wire shapes of the config body, routes and SDK calls are owned by BRIDGE.md, PORTAL-API.md and SDK-API.md; this file owns every credential field they carry.
+
+## 1. Caller types (exactly five)
+| Caller type | Identity | Proves itself with | Talks to |
+|---|---|---|---|
+| person | `per_` (1:1 with the Clerk account owner) | K1 (browser), K3 (owner CLI / owner native session in TBD), K11 (one-time ticket, at bridge key page or app launch only) | Portal (K1, K3); bridge key page (K11 `keys`); app UI (K11 `launch`); K11 is obtained only with K1 |
+| agent | `agt_` (agent card) | K5 at the bridge, obtained via K4 assertion or K2b pairing | the deployed bridge only (directly or through the local relay) |
+| app | `ins_` (app instance; its runtime services are part of it) | instance assertion (K8); companion grant (K10, `sub = tb:ins:`) | the bridge internal endpoints only |
+| bridge | `brg_` | bridge assertion (K7) to Portal; signs K5 and call proofs | Portal (outbound only); apps (private network) |
+| Portal | `tb:portal` (Core) | K12 signatures on K2b, K9, K10, K11 | nobody inbound; Portal never calls into customer infrastructure |
+
+There is no sixth caller: the GUI gateway is not a caller (it forwards the caller's own credential and adds no identity headers; §18 R-no-shared-secret), Clerk/Stripe/Railway are external issuers, and a local relay bridge acts as the agent (CORE §9).
+
+## 2. Identifier model
+Agent ≠ connection ≠ device-flow request ≠ session ≠ person. Id format CORE §1; reference format `tb:<kind>:<id>` CORE §2 (`tb:portal`, `tb:per:per_…`, `tb:agt:agt_…`, `tb:ins:ins_…`, `tb:brg:brg_…`).
+| Identifier | Issued by | When | Pairing flow | Ends |
+|---|---|---|---|---|
+| person `per_` | Core (bound to Clerk `sub`) | first Clerk sign-in | browser: Clerk; CLI/TBD: device flow `scope=owner` (§6) → K3 | account deletion |
+| agent `agt_` | Core | owner creates the agent card in the browser (or a draft applied by the owner) | none itself; it gets connections | owner revokes the card |
+| connection `con_` (= one machine / harness install of an agent) | key method: Core at device-flow approval; pairing method: the bridge at K2b redemption (reported in the next config ack; Core records it, CORE §9) | §6, §7 | key: K4 + device flow `scope=agent`; pairing: K2b → OAuth (Claude Desktop / Codex connector only) | owner revokes the connection, refresh reuse detected, agent revoked |
+| device-flow request `dev_` | Core | device authorization request | RFC 8628 (§6) | approval, denial or 10 min |
+| session | bridge | each `/oauth/token` success | one K5 access token (`jti`); its refresh chain is identified by `(con, gen)` | access `exp` (15 min); chain ends with the connection |
+
+A connection belongs to exactly one agent; an agent has 0..n connections; a session belongs to exactly one connection; no identifier is derived from a person credential.
+
+## 3. Common token rules (every kind we issue)
+- JWS compact, ≤ 8192 bytes. JOSE header has exactly `alg`, `typ`, `kid`; `alg = "EdDSA"` (Ed25519); `kid` = RFC 7638 SHA-256 thumbprint (base64url, 43 chars) of `{crv,kty,x}`. Headers `jku`, `jwk`, `x5u`, `x5c`, `crit` → reject.
+- Payload: `iss`, `sub`, `aud` (one string, never an array), `iat`, `exp` (integer seconds), `jti` (26-char ULID, no prefix) are mandatory; the claim set per kind is closed (unknown claim → reject).
+- Leeway L = 30 s: accept only if `iat ≤ now + L` and `now < exp + L` and `exp − iat ≤ max lifetime of the kind` (§4).
+- Check order (every verifier, "V0"): (1) size + 3 parts → (2) header exact, `alg`, `typ` = the ONE typ this endpoint accepts → (3) `kid` in the key set trusted for that typ's issuer → (4) signature → (5) closed claim set, types → (6) `iss` allowed for this typ → (7) `aud` = verifier's own reference → (8) time window + max lifetime → (9) kind-specific checks → (10) one-time kinds: `jti` not seen, then record it until `exp + L`. A failure at any step → refuse with error code `invalid_token` (no detail on which step to the caller; detail in the verifier's log, never the token itself).
+- Opaque values (K2, K3, K6, refresh tokens, OAuth authorization codes): 32 random bytes, base64url (43 chars), behind a fixed prefix; the issuer stores only `sha256:<hex>` of the full string and compares in constant time.
+| Opaque value | Prefix | Issuer |
+|---|---|---|
+| device code (K2) | `tbdv_` | Core |
+| owner CLI session (K3) | `tbo_` | Core |
+| enrolment code (K6) | `tbe_` | Core |
+| agent refresh token (K5) | `tbr_` | bridge |
+| OAuth authorization code (K5 issuance step) | `tbac_` | bridge |
+
+## 4. Credential registry (13 kinds)
+Max lifetime is enforced by every verifier (`exp − iat`). "Digest" = SHA-256 at the issuer; "sealed" = AES-256-GCM under a KEK (§9).
+| # | Kind / `typ` | Issuer key → holder | Storage | Lifetime (max) | Audience rule | Verifier (key) | Revocation (mechanism → speed) | Pause |
+|---|---|---|---|---|---|---|---|---|
+| K1 | person session (Clerk JWT) | Clerk → browser | Clerk cookie; Core stores nothing | Clerk token 60 s, refreshed by Clerk JS | Clerk `azp` = Portal origin | Core (Clerk JWKS) | Clerk sign-out / session revoke → ≤ 60 s | n/a (person) |
+| K2 | device code (opaque `tbdv_` + user code) | Core → CLI / TBD | digest (both codes) | 600 s | bound to `client_id` + `scope` at Core | Core (digest) | deny / expiry → immediate | Core refuses `scope=agent` approval while workspace kill switch is on |
+| K2b | agent pairing code `tb-pair+jwt` | K12 → owner, redirected (path A) or pasted (path B) into the bridge authorize page; OAuth connector paths only | not stored by holder; Core keeps `jti` + state; bridge keeps used `jti` (persisted) | 600 s | `aud = tb:brg:<workspace bridge>` | bridge (Portal key set) | Core adds `jti` to `revoked.jtis` → ≤ 60 s; one-time | redemption refused while workspace kill switch or agent pause |
+| K3 | owner CLI session / owner native session (opaque `tbo_`, `client: cli \| tbd` recorded at Core) | Core → owner CLI / TBD person keychain item (ACL with user presence where supported) | digest | 30 d absolute, 24 h idle | Core routes marked owner-CLI-allowed only: reads + drafts; never apply, codes or tickets (§12) | Core (digest) | `tealbrick logout` / Portal session list → immediate | n/a (person; drafts never act) |
+| K4 | agent connection key (Ed25519 pair) | agent machine → itself; Core stores public JWK | private: OS keychain on the agent machine; public: Connection Registry + config | until the connection is revoked | its assertions: `aud = tb:brg:<id>` | bridge (public key from config) | connection revoke → ≤ 60 s | see K5 |
+| K5 | agent session `tb-agent-session+jwt` + refresh `tbr_` | K7 → agent (harness / stdio relay, which holds it in memory; no relay-local token, CORE I5) | access: memory only; refresh: holder keychain / harness store, bridge keeps digest + `gen` | access 900 s; refresh 30 d sliding | `aud = tb:brg:<self>` | bridge (own key) | config drops/revokes `con` or `agt` → ≤ 60 s; refresh reuse → chain revoked at once | calls refused by `gate()` (1); issuance continues (§13) |
+| K6 | enrolment code (opaque `tbe_`) | Core → env `TB_ENROL_CODE` of one bridge / instance / service | digest | ≤ 24 h, one-time | bound at issue to `{ws, target: bridge \| ins_ [+ svc]}` | Core (digest) | redeemed / expired / superseded by a new code → immediate | Core refuses redemption for a paused instance |
+| K7 | bridge key (Ed25519 pair) | bridge → itself; Core stores public JWK | private: sealed on bridge volume (`TB_KEK`); public: Bridge registry, slices | until re-enrolment | bridge assertions `aud = tb:portal` | Core (registered public key); apps (key from slice) | re-enrolment → Core refuses old key at once; apps ≤ 60 s + slice | n/a (the bridge enforces pause) |
+| K8 | instance key (Ed25519 pair, one per instance and per runtime service) | app → itself; Core stores public JWK | private: sealed on app volume (`TB_KEK`); public: Instance Registry + config | until re-enrolment / deletion | instance assertions `aud = tb:brg:<id>` | bridge (public key from config) | re-enrol / delete instance → ≤ 60 s | instance pause / kill switch: assertions accepted only for slice pull and status (§13) |
+| K9 | workspace config `tb-config+jws` / instance slice `tb-slice+jws` (two `typ`s, one kind) | K12 (standalone: bridge key for slices) → bridge (→ app) | bridge: last good config on volume; app: last slice in its DB | 12 h (`iat + 43200`); older → fail closed (C9) | config: `aud = sub = tb:brg:<id>`; slice: `aud = sub = tb:ins:<id>` | bridge (Portal key set); app SDK (Portal key set / standalone issuer) | superseded by higher `rev` | carries pause state |
+| K10 | grant `tb-grant+jwt` (agent→app and companion app→app) | K12 (standalone: bridge key) → bridge (agent grants) / calling app (companion grants, from slice) | memory + config/slice cache | 43200 s, re-minted at half-life | `aud = tb:ins:<target>`; `cnf.brg` = workspace bridge | bridge `verifyGrant` before forwarding; app SDK `verifyGrant` again (Portal key set) | not re-minted + `revoked.jtis` → ≤ 60 s online; offline ≤ 12 h | not minted while paused; `gate()` (1) refuses |
+| K11 | person ticket `tb-ticket+jwt` (`pur: launch \| keys`) | K12 (standalone: bridge key) → browser of a K1 person (never via K3) | not stored by holder; `jti` used-set: app DB (`launch`), bridge volume (`keys`) | launch 60 s; keys 120 s; one-time | `launch`: `aud = tb:ins:<target>`; `keys`: `aud = tb:brg:<id>` | app SDK (`launch`) / bridge key page (`keys`) (Portal key set) | not re-issuable after use; app UI session ends by `personNbf` (§12) | not paused (owner access by design, §13) |
+| K12 | Portal signing key (Ed25519) | Core → Core | private sealed in Core DB (`TB_KEK`); public in config, slices, `TB_PORTAL_KEYS` | planned rotation 90 d | — | — | rotation / compromise procedure §9 | n/a |
+
+No purpose has two kinds: human at Portal = K1; human at CLI/TBD = K3; device pairing = K2; harness OAuth pairing = K2b; agent calls = K5; one-time registration = K6; agent→app and app→app = K10; person into app/key page = K11; configuration = K9.
+
+Intermediate artefacts inside one kind's issuance (not separate kinds, never accepted elsewhere): the device-flow `user_code` (K2); the OAuth authorization code `tbac_` (60 s, one-time, digest, bound to `client_id`, `redirect_uri`, PKCE S256 `code_challenge`, `con`) and the DCR `client_id` (public client, no secret) inside K5 issuance; the app UI session cookie and the key-page cookie created by redeeming K11 (§12). Purposes are disjoint: the CLI and TBD connect agents only with K2 + K4 (key connection); K2b serves only harness OAuth connectors (C16 S9).
+
+## 5. Claims per kind (exact names; `types/credentials.ts` is normative)
+| Kind | `iss` | `sub` | `aud` | Other claims |
+|---|---|---|---|---|
+| K2b pairing code | `tb:portal` (never issued in standalone, §17) | `tb:agt:<id>` | `tb:brg:<id>` | `ws`; `rid?` (bridge authorize-request id, only on the redirect path §7) |
+| K5 agent session | `tb:brg:<id>` | `tb:agt:<id>` | `tb:brg:<id>` (same bridge) | `ws`, `con`, `gen` (connection credential generation from config) |
+| K9 config | `tb:portal` | `tb:brg:<id>` | `tb:brg:<id>` | `ws`, `v: 1`, `rev` (monotonic int) — the body (BRIDGE.md schema) carries the credential section §5.1 |
+| K9 slice | `tb:portal` (standalone `tb:brg:<id>`) | `tb:ins:<id>` | `tb:ins:<id>` | `ws`, `v: 1`, `rev` |
+| K10 grant | CORE §6 verbatim | `tb:agt:<id>` or `tb:ins:<caller>` | `tb:ins:<target>` | `ws`, `cnf: {brg}`, `crud`, `mode`, `held`, `caps`, `wf`, `polrev` |
+| K11 launch | `tb:portal` (standalone `tb:brg:<id>`) | `tb:per:<id>` | `tb:ins:<target>` | `ws`, `pur: "launch"`, `path?` (app-relative UI path, must start with `/`) |
+| K11 keys | same | `tb:per:<id>` | `tb:brg:<id>` | `ws`, `pur: "keys"`, `req?` (requirement names to focus; display only) |
+
+All also carry `iat`, `exp`, `jti`. K1 is Clerk's format and is never in `tb:` form (CORE §2).
+
+### 5.1 Credential section of config and slice (field names fixed here; container schema in BRIDGE.md)
+| Field | In | Content |
+|---|---|---|
+| `portalKeys` | config, slice | `[{jwk, status: "pending" \| "active" \| "retired"}]` — the only way a verifier learns a new Portal key (§9) |
+| `bridge` | slice | `{id, keys: [jwk]}` — keys the app accepts for call proofs |
+| `connections` | config | `[{con, agt, method: "key" \| "pairing", gen, publicKey? (key method), status: "active" \| "revoked"}]` |
+| `instanceKeys` | config | `[{ins, svc?, jwk}]` — keys the bridge accepts for instance assertions |
+| `pause` | config, slice | `{workspace: boolean, agents: agt_[], instances: ins_[]}` (connections are revoked, not paused) |
+| `revoked` | config, slice | `{jtis: [{jti, exp}]}` — grants / pairing codes withdrawn before `exp`; entries drop after `exp` |
+| `personNbf` | slice | epoch seconds; app UI sessions created before it are invalid (§12) |
+| `standalone` | config, slice | absent, or `{issuer: "tb:brg:<id>", kid, ownerKeys: [jwk]}` (§17) |
+| grants | config (agent grants), slice (companion grants held by that app) | K10 compact strings |
+
+## 6. Device flow (K2, RFC 8628) — owner CLI, TBD person, key connections
+Wire shapes: `types/routes.ts` is the ONE source (`DeviceStartInput`, `DeviceStart`, `DeviceTokenInput`, `DeviceOwnerTokenResult`, `DeviceAgentTokenResult`; ops `device.start`, `device.token`, `device.lookup`, `device.approve`, `device.deny`). This section fixes only the credential rules; it does not restate fields.
+| Item | Rule |
+|---|---|
+| Start (public) | `DeviceStartInput` is a discriminated union. `scope: "owner"` only with `client_id` ∈ `tealbrick-cli`, `tbd` and no key. `scope: "agent"` with `client_id` ∈ `tealbrick-cli`, `tbd`, `kit`, a harness, a machine label (≤ 64 chars, display only) and 1..64 `{agt?, public_key}` pairs (one approval, C16 S4). Any other combination (e.g. `kit` + `owner`, a key on an owner request) → refused. A kit can never obtain K3. |
+| `device_code` | `tbdv_` + 43 base64url; digest only |
+| `user_code` | 8 chars from `BCDFGHJKLMNPQRSTVWXZ` shown `XXXX-XXXX` (≈ 2^34.6); digest of the normalised form (upper case, no hyphen); returned in clear only in the start response |
+| Lifetime / polling | 600 s; interval 5 s; `slow_down` adds 5 s; RFC 8628 error names inside our error envelope (C15) |
+| Binding (no unbound approval) | Core never lists pending requests. `device.lookup {userCode}` (K1, `userCode` required) returns exactly the one request whose digest matches, with no clear user code in the output. `device.approve {userCode, ws?, agents?}` (K1) matches the digest again. Wrong user codes: 5 per K1 session per 10 min, then refused. J1 "one click" stays: TBD / CLI opens `verification_uri_complete`; the Portal page reads the code from the URL and calls lookup. |
+| Owner approval screen (`scope=owner`) | shows client, machine label, request time, user code, and the text "This signs in a tool AS YOU — never approve for an agent."; one Approve |
+| Agent approval screen (`scope=agent`) | shows client, harness, machine label, user code, and for each pair the agent card (pre-selected or chosen among the workspace's cards) and workspace; one Approve creates all connections |
+| Result `scope=owner` | `DeviceOwnerTokenResult` carries the K3 value once; Core keeps its digest + `client: cli \| tbd` |
+| Result `scope=agent` | Core creates one `{con, agt, method: "key", publicKey, gen: 1}` per pair; `DeviceAgentTokenResult` carries identifiers and bridge endpoints and NO bearer. The agent waits until the connection is in the bridge config (bridge answers `invalid_grant` / `connection_unknown` until then; retry with backoff ≤ 60 s) and exchanges a K4 agent assertion (§10). |
+| Conformance | `cred.dev.no_unbound_list`, `cred.dev.approve_requires_user_code` (missing / wrong code refused; 6th try refused even with the right code), `cred.dev.no_clear_user_code` (no output after start carries it; DB holds the digest), `cred.dev.one_time`, `cred.dev.expiry`, `cred.p1.kit_cannot_get_owner` |
+
+## 7. Agent pairing code (K2b, C4) — Claude Desktop / Codex OAuth connectors only
+- Issued by Core on the agent card (owner, K1 or applied draft) for that agent and the workspace bridge. 10 min, one-time. Core records `{jti, agt, exp, state: issued|redeemed|cancelled}`; "cancel" adds the `jti` to `revoked.jtis`. The CLI and TBD never use K2b; they use the key connection (§6).
+- Path A (preferred for J1, no terminal, no copy-paste): the harness opens the bridge `/oauth/authorize` (PKCE S256, DCR client). The page shows "Approve in Portal"; it creates a request id `rid` (bound to the pending authorization request, 10 min) and a pairing state proof (§10, `tb-pair-state+jwt`) and sends the browser to `https://<portal>/pair` with the state in an auto-submitting form POST. Core verifies the state (registered bridge key, `ret` = that bridge's registered public URL + `/oauth/pair/callback`, `jti` unused) and that the bridge's workspace belongs to the K1 principal's account. The approve screen shows the agent card picker, the redirect URI host (`rh`) and the DCR client name (`cn`) marked "unverified". On confirm, Core mints K2b with `rid` = state `rid` and returns the browser to `ret` with an auto-submitting form POST (`code=<K2b>`), never a URL query; the bridge verifies it offline.
+- Path B (fallback): the owner copies the code from the agent card and pastes it on the bridge authorize page.
+- Bridge verification: V0 with `typ = tb-pair+jwt`, Portal key set, `iss = tb:portal`, `aud = tb:brg:<self>`; then (9) `ws` = config workspace; `sub` agent exists in config and is neither revoked nor paused; workspace kill switch off; `rid` present ⇔ path A and equal to the pending request; last successful config pull ≤ 10 min ago (bounds a leaked Portal key at an offline bridge, §9.4); (10) `jti` unused (persisted until `exp + L`). Success → the bridge creates `con_` (method `pairing`, `gen = 1`), issues an authorization code bound to the pending request, and reports the connection in the next config ack.
+
+## 8. K5 issuance and refresh (bridge `/oauth/token`)
+| `grant_type` | Who | Input | Output |
+|---|---|---|---|
+| `authorization_code` | pairing (OAuth) connection | `tbac_` code + PKCE `code_verifier` + `client_id` + `redirect_uri` | access + refresh |
+| `refresh_token` | pairing connections | `tbr_` | new access + new refresh (rotation) |
+| `urn:ietf:params:oauth:grant-type:jwt-bearer` (RFC 7523) | key connections | `assertion` = agent assertion (§10) | access only (no refresh: the agent re-asserts with K4; C15) |
+No other grant type exists.
+- Refresh rotation: each use invalidates the presented token and stores the new digest with `gen+1`; the immediately previous token is accepted once within 30 s of its rotation (network-retry grace, CORE I12); any other reuse of a rotated token → the whole chain of that `con` is revoked, the event is reported in the ack, the owner sees "connection signed out". Refresh valid 30 d from its own issue (sliding).
+- The bridge refuses issuance for a `con` that is unknown or `revoked`, an agent that is revoked, or `gen` lower than config. Issuance is allowed while paused (calls are refused, §13).
+- Access token use: every MCP request `Authorization: Bearer <K5>`; bridge check: V0 (`typ = tb-agent-session+jwt`, own key, `iss = aud = tb:brg:<self>`), then `con` active in config with `gen` equal, `sub` = the connection's agent, `ws` = config workspace; then `gate()`.
+
+## 9. Key management
+### 9.1 Sealing (Core, bridge, apps — one format)
+Sealed blob = JSON `{v: 1, alg: "A256GCM", kek: <KEK id>, iv: <12 random bytes b64url>, ct, tag}`, AAD = `tb:seal:<purpose>:<record id>` (e.g. `tb:seal:portal-key:<kid>`), so a blob cannot be moved to another record. KEK = 32 random bytes from the service environment, one env name everywhere (CORE I13): Core `TB_KEK` + `TB_KEK_ID` (Railway sealed variable); bridge and apps `TB_KEK`, generated by the provider at deploy (Railway `secret()` variable function) so Portal never sees it; if the provider cannot generate it, the service creates it on first boot in a file under `TB_DATA_DIR` that is excluded from backups (CORE I3). A KEK is a sealing key, never presented, and not one of our credential kinds ("not ours"); the same holds for provider-generated service passwords (`env[].generate: "secret"`). KEK rotation: set `TB_KEK_PREVIOUS` + new `TB_KEK`, restart, the service reseals every blob on start, then remove `TB_KEK_PREVIOUS`.
+
+### 9.2 Portal signing keys (K12)
+- One global key set (not per account). States: `pending` (announced, never signs) → `active` (exactly one; signs) → `retired` (verify only; private half destroyed at retirement) → removed from key sets.
+- Trust rule (CORE §4): a verifier adds a key only from a document signed by a key it already trusts (config, slice) or from its bootstrap (bridge: enrolment response over TLS to `TB_PORTAL_URL`; app: `TB_PORTAL_KEYS`). Once a slice/config has been installed, its `portalKeys` replace the bootstrap set (a key removed by a newer document is not re-trusted from env on restart).
+- Planned rotation (every 90 d, or on demand):
+| t | Action |
+|---|---|
+| T0 | generate key B (`pending`), sealed; next config revision and all slices list B as `pending` |
+| T0 + 24 h | B → `active` (signs everything from now on); A → `retired`, private half destroyed |
+| T0 + 24 h + 12 h + 5 min | A removed from `portalKeys` (every A-signed token — max 12 h — has expired) |
+| next app redeploy | `TB_PORTAL_KEYS` env rewritten (public value) |
+- Bootstrap: the first key of a fresh Core is `active` at once.
+
+### 9.3 Bridge, instance and agent keys
+Generated where they are used (bridge first start; instance/service first start; agent machine before device flow), never exported, private half never leaves the host. Portal stores only public JWKs. Rotation = re-enrolment (new K6 for bridge/instance) or a new connection (agent).
+
+### 9.4 Compromise procedures
+| Leaked | Exposure | Procedure (in order) | Effect / speed |
+|---|---|---|---|
+| Portal key (K12 private, or `TB_KEK` + DB) | forge K2b (new agent connections at a bridge), K11 (launch into apps, key page writes), grants (useless without a bridge call proof) | (1) generate key B, `active` at once (skip the 24 h); (2) next config/slices, signed with A, list B `active` and remove A; (3) re-mint all grants with B in that revision; (4) revoke every connection created by pairing since the suspected leak (Core lists them from acks); (5) if `TB_KEK` leaked: rotate KEK (§9.1), roll Railway refresh token (re-link) and Stripe webhook secret; (6) audit + incident record | online bridges/apps ≤ 60 s; offline bridges refuse K2b once their last pull is > 10 min old (§7); key-page writes are write-only (no value disclosure) |
+| bridge key (K7) | forge K5 for any agent of that workspace, call proofs | (1) owner re-enrols the bridge (new K6) → new K7; Core refuses old key immediately; (2) slices carry the new bridge key; (3) if the volume leaked too: wipe refresh digests (all pairing connections re-pair) and rotate every account-default key in the key store | forged K5 dead at the bridge on restart with the new key; apps ≤ 60 s |
+| instance key (K8) | act as that app at the bridge (companion calls, fetch its declared keys) — private network access needed | (1) pause the instance; (2) re-enrol it (new K6); (3) rotate the third-party keys that app may fetch (Portal shows their names) | ≤ 60 s |
+| agent key (K4) / refresh token | act as that agent | revoke the connection in Portal; re-authorise with a new device flow / pairing | ≤ 60 s online; offline bridge ≤ 12 h |
+| owner CLI / native session (K3) | create drafts, read workspace (no apply, no codes, no tickets) | revoke in Portal (or `tealbrick logout`) | immediate |
+
+## 10. Proofs that are not credentials (cannot be used alone)
+All: V0 rules; the three call-proof variants are told apart by exactly one of `gjti`, `hook`, `bop`; ≤ 60 s lifetime (pairing state: 600 s), `jti` replay set at the verifier until `exp + L` (memory is enough; replay after a verifier restart is bounded by 90 s and by the body binding). Header for bridge and instance assertions: `TB-Assert: <jws>` (one header name; `Authorization` is never used for assertions).
+| Proof | `typ` | Signed by | `iss` / `sub` | `aud` | Other claims | Verifier checks after V0 |
+|---|---|---|---|---|---|---|
+| agent assertion | `tb-agent-assert+jwt` | K4 | `tb:agt:<id>` / same | `tb:brg:<id>` | `con` | `kid` = thumbprint of the active connection's `publicKey`; `con` belongs to `sub`; connection `active`; agent not revoked |
+| bridge assertion | `tb-bridge-assert+jwt` | K7 | `tb:brg:<id>` / same | `tb:portal` | `htm`, `htu` (path + query), `bd?` (sha256 of raw body; required when a body exists) | Core: `kid` = the bridge's registered key; method/path/body match |
+| pairing state (bridge assertion variant, front channel; max 600 s, one-time) | `tb-pair-state+jwt` | K7 | `tb:brg:<id>` / same | `tb:portal` | `rid`, `ret` (absolute https callback URL), `rh` (redirect URI host of the pending request), `cn` (DCR client name; display only, "unverified") | Core `/pair`: `kid` = the bridge's registered key; `ret` = registered bridge public URL + `/oauth/pair/callback`; `jti` unused (Core keeps it until `exp + L`) |
+| instance assertion | `tb-instance-assert+jwt` | K8 | `tb:ins:<id>` / same | `tb:brg:<id>` | `svc?` (runtime service name), `htm`, `htu`, `bd?` | bridge: `kid` ∈ `instanceKeys` for `(ins, svc)`; method/path/body match; pause rule §13 |
+| call proof (op) — `gjti` present | `tb-call+jwt` | K7 | `tb:brg:<id>` / caller (`tb:agt:` or `tb:ins:`) | `tb:ins:<target>` | `call` (call id `call_…`), `gjti` (the grant's `jti`), `op`, `in` (sha256 of JCS input), `ctx` (sha256 of JCS context) | app SDK: `kid` ∈ slice `bridge.keys`; `iss` = grant `cnf.brg`; `sub` = grant `sub`; `aud` = grant `aud`; `gjti` = grant `jti`; `op` = route op; `in`/`ctx` match body |
+| call proof (hook) — `hook` present | `tb-call+jwt` | K7 | `tb:brg:<id>` / caller | `tb:ins:<hook app>` | `call`, `hook`, `phase`, `ctx`, `in?` | app SDK: `kid` ∈ slice `bridge.keys`; `hook` declared in own manifest with that `phase`; body digests match. No grant is sent with hook calls. |
+| call proof (bridge op) — catalog, dynamic resolve, mark, scope summary | `tb-call+jwt` | K7 | `tb:brg:<id>` / same | `tb:ins:<target>` | `call`, `bop` (`catalog` \| `resolve` \| `mark` \| `scope_summary`), `op?`, `in?` | app SDK `verifyBridgeOpProof`: `kid` ∈ slice `bridge.keys`; `iss` = slice `bridge.id`; `bop` matches the route `POST /tb/v1/bridge/<bop>` (`catalog`, `resolve`, `mark`, `scope-summary`); `op` (if present) declared in own manifest; `in` = sha256 of JCS body; no grant; no agent action runs on these routes |
+
+## 11. The ONE grant (K10) — CORE §6, plus
+- Same kind for agent→app (`sub = tb:agt:`) and companion app→app (`sub = tb:ins:<caller>`). Companion grants exist only for manifest-declared companion edges, are minted with `mode: "bound"`, `wf` = the manifest-declared companion operations (CORE I8), `held` = the workspace default held families (always including `money`) and `caps: {}` (C16 S5), and are delivered in the calling app's slice field `grants`.
+- `caps` shape (CORE I14): `{write?: Cap, outward?: Cap, destructive?: Cap}`, `Cap = {max: integer ≥ 0, per: "hour" | "day"}`; `money` has no cap (always held).
+- Minted only for licensed, unpaused edges: an app deployed before payment (J1 licence-last) has its edge on the canvas, but no grant and no launch ticket exist until `isEntitled` is true; the GUI shows the glowing pay pill.
+- `verifyGrant` (CORE §7) check order: V0 (`typ = tb-grant+jwt`, Portal key set or standalone issuer, `iss` ∈ {`tb:portal`} or the standalone issuer, `aud` = target instance, max 43200 s) → `ws` = own workspace → `cnf.brg` = workspace bridge id → `jti` ∉ `revoked.jtis`. Bridge, before forwarding a companion call, additionally: `sub` = the instance that signed the instance assertion. App, on receipt: the call proof (§10) binds the grant to this exact call.
+- Scope rule: the app is the authority for scope assignments. Effective access = `grant.crud ∩ operation.crud ∩ scope access` (`authorize()`, CORE §7); scope access comes from the app's own store, never from a caller header or claim.
+- No introspection: no Portal route answers "is this grant / token valid"; no verifier calls Portal or the bridge to check a token. Revocation is expressed only by short lifetimes, config/slice content and the bridge's own state.
+
+## 12. Person credentials, owner CLI, TBD
+- K1 is accepted only by Core behind the Portal gateway: verify with Clerk JWKS (cached ≤ 1 h, refetch on unknown `kid`), `iss` = Clerk frontend API, `azp` = Portal origin, time window, then map `sub` → `per_`.
+- Owner CLI (K3): person mode = drafts + reads only. K3 is accepted only on route rows marked owner-CLI-allowed (reads, draft create/edit/validate/submit); it can never apply a draft, obtain any K11 (`launch` or `keys`), issue K2b or K6 codes, approve device flows, or call a `confirm` row. Route-table compile check (PORTAL-API): no output type reachable with K3 contains a code, ticket or other credential.
+- Boundary = the OS user: any process of that user can drive `tealbrick` with the K3 keychain item, including an agent with a shell on an FDE machine. K3 is therefore kept harmless (reads + drafts, nothing acts until the owner applies in the browser), idles out after 24 h, and is stored with a keychain ACL requiring user presence where the OS supports it. `tealbrick login` warns when agent keychain items exist on the same machine. Apply = a K1 browser session + one confirmation on the draft review page; the apply request carries the `draftDigest` the owner saw (mismatch → refuse). `tealbrick logout` revokes server side (Core deletes the digest) and deletes the local item; the Portal account page lists and revokes all K3 sessions.
+- TBD has two identities, stored separately: (a) the person: device flow `client_id=tbd, scope=owner` → K3 named "owner native session" (`client: tbd`), in TBD keychain item `tealbrick.person`, same draft + read-only limits, listed and revocable in the Portal session list; it never obtains K11 — TBD opens Portal launches (e.g. to decide holds in an app) in the system browser with K1, and shows pending-hold counts from status (C16 S2); (b) TBD's agent: a key connection (K4 in keychain item `tealbrick.agent.<con>`, device flow `scope=agent`). The agent process is started with an allow-listed environment and gets only its K5 (or K4 handle via the local relay); the person token is never in its env, argv, files, IPC or logs. The `tealbrick` CLI uses the same two items and refuses agent-mode commands with K3 and owner commands with agent credentials (distinct `typ` / prefix).
+- K11 redemption sessions: `launch` → the app SDK sets one cookie (HttpOnly, Secure, SameSite=Lax, Path `/a/<product>/`, 8 h absolute) bound to `per` + `ins`; invalid when its creation time < slice `personNbf` ("sign out everywhere" in Portal bumps `personNbf`). `keys` → the bridge sets a key-page cookie (Path `/keys`, 15 min). The key page is write-only: it shows presence, never values.
+
+## 13. Pause matrix
+Enforcement points: **B** = bridge (`gate()` step 1 on config `pause`; connection status), **C** = Core (stops minting / issuing), **A** = app SDK (`authorize()` step 0 on slice `pause`, CORE I1). Online latency: bridge ≤ 60 s (config long-poll, C9); app ≤ 60 s after the bridge (slice long-poll). Offline from Portal: Core cannot reach the bridge; grants expire ≤ 12 h and a config older than 12 h fails closed (C9).
+| Path that reaches an app | Workspace kill switch | Agent pause | Connection revoke | Instance pause |
+|---|---|---|---|---|
+| K5 → MCP `tools/call` (direct or relay) | B refuse `paused` ≤ 60 s; C no grants | B refuse for that agent ≤ 60 s; tools/list empty; C no grants | B rejects that `con`'s K5 and refresh (`invalid_token`) ≤ 60 s | B refuse calls to it, its tools removed ≤ 60 s; C no grants with `aud` = it |
+| K10 agent grant at the app | C stops re-minting → ≤ 12 h even offline; B never forwards | same, for that agent | n/a at app: the bridge, the only holder of connection state, stops the call first | A refuses all ops on itself ≤ 60 s after B |
+| K10 companion grant (app→app) | B refuse ≤ 60 s | n/a: `sub` is an app (opt2 has no on-behalf-of); new agent calls are refused first; companion calls for work a paused agent already started may finish (accepted, C16 S13) | n/a (same reason) | B refuse if caller or target paused; A (target) refuses; caller SDK does not send |
+| Instance assertion (companion call, key fetch, status, slice pull) | B accepts only slice pull + status report (so the pause reaches the app); all else refused | n/a (not agent-bound) | n/a | same as kill switch, for that instance |
+| Bridge-op calls (catalog, resolve, mark, scope summary) | metadata only, no agent action; continue (calls that would need them are refused anyway) | n/a | n/a | B sends none to a paused instance |
+| Hook calls | none made (call refused before the chain) | none made | none made | hook app paused: its `before`/`context` hooks → every call in that chain refused (fail closed); its `after` hooks → output withheld (`after_failed`) |
+| Key fetch `/tb/v1/keys` | B refuse; A drops cached key values on the paused slice | n/a | n/a | B refuse for that instance; A drops cache. Env already injected by `tb-exec` stays until restart; the engine is reachable only through its (refusing) app |
+| New connection (K2 `scope=agent` approval, K2b redemption) | C refuses approval and K2b issue; B refuses K2b | C refuses K2b for that agent; B refuses | n/a (new connection = new `con`) | n/a |
+| K5 issuance / refresh | allowed (sessions are not calls) | allowed | refused | n/a |
+| Person ticket `launch` | not paused by design (accepted, C16 S13): owner must reach the app to inspect and decide holds | n/a | n/a | not paused (owner configures a paused app) |
+| Held action released by the owner in the app | A refuses to execute while paused (approval kept; executes after unpause or expires) | A refuses for that agent's holds | n/a (holds are agent-bound) | A refuses |
+| Person ticket `keys` | not paused (accepted, C16 S13; key page stays up, C9) | n/a | n/a | n/a |
+
+## 14. Revocation matrix
+| Action | Mechanism | What stops | How fast (online / offline from Portal) |
+|---|---|---|---|
+| Revoke agent (delete card) | Core removes agent + its connections from config; grant `jti`s → `revoked.jtis`; no new grants, K2b, device approvals | all K5 of all its connections, refresh chains, K4 assertions, pending K2b; app grants | bridge ≤ 60 s / ≤ 12 h |
+| Revoke connection | config `connections[].status = revoked` | that `con`'s K5, refresh chain, K4 assertions; other connections of the agent keep working | ≤ 60 s / ≤ 12 h (grant expiry) |
+| Revoke person session / owner CLI session | Clerk revoke (K1); Core deletes K3 digest; optional "sign out everywhere" bumps `personNbf` | Portal GUI (≤ 60 s), owner CLI and TBD person (immediate), app UI sessions (≤ 60 s + slice) — agents are unaffected | as stated / app UI sessions end at their 8 h max |
+| Rotate / revoke bridge | Portal op issues a new K6; the new bridge key replaces the old | old key's bridge assertions refused by Core immediately; old K5 invalid at the new key; apps accept only the new key from the next slice | immediate at Core; apps ≤ 60 s |
+| Delete instance | Core removes it from config: grants with it as `aud` or `sub` withdrawn (`revoked.jtis`), `instanceKeys` entry removed, unused K6 invalidated | calls to/from it, its assertions, key fetch, launch tickets | ≤ 60 s / ≤ 12 h |
+| Rotate Portal key | §9.2 (planned) / §9.4 (compromise) | tokens signed by the old key once it is removed | planned: none stop early; compromise ≤ 60 s |
+| Delete / replace a workspace default key | bridge key store write bumps `keysRev` (delivered with the slice pull, BRIDGE / SDK-API) | the app SDK drops cached values and refetches; `tb-exec` restarts the engine services so they get the new value | ≤ 60 s (bridge-local; works offline from Portal) |
+| Cancel unused pairing code | `jti` → `revoked.jtis` | that code | ≤ 60 s (or its 10 min `exp`) |
+
+## 15. Key custody (option B, CORE §10, C2)
+- Account-default keys live only in the bridge key store (sealed with `TB_KEK`), entered on the bridge key page opened with a K11 `keys` ticket. An app fetches `GET <bridge internal>/tb/v1/keys/<name>` with an instance assertion and receives only names its manifest declares with `source: account_default`. App-own keys (`source: app_own`) are entered in the app UI and stored in the app; when both exist the app-own key wins.
+- Values are never logged, never in config, slices, acks, errors or traces, never sent to Portal. Portal sees only presence booleans per requirement name from the status report.
+
+## 16. External credentials Core holds (not ours; never leave Core)
+| Credential | Storage | Use | Rotation |
+|---|---|---|---|
+| Railway OAuth refresh token (C3) / fallback pasted Railway workspace token | sealed in Core DB (§9.1), one per account link | Core deploy calls only | refresh token rotated and resealed on every use; pasted token: owner replaces |
+| Stripe webhook secret, Stripe secret key, Clerk secret key, Railway OAuth client secret, `TB_KEK` | Core service env (Railway sealed variables); never in DB, logs or responses | Core only | rolled at the provider, then env updated |
+None of these is ever sent to a bridge, app, agent or browser.
+
+## 17. Standalone issuer handover (leaving Portal; C16 B7)
+1. Before handover the owner runs `tealbrick standalone owner-key`: the CLI generates an Ed25519 owner key in the OS keychain and prints its public JWK; the owner pastes it into the "Leave Portal" step (K1 + confirmation).
+2. Core publishes a final config and final slices (signed by K12) with `standalone = {issuer: "tb:brg:<id>", kid: <K7 thumbprint>, ownerKeys: [<owner jwk>]}` and with `portalKeys` emptied.
+3. The final config is frozen: the bridge keeps it as state S9 "self-issued config + owner keys" (BRIDGE §1.2). The C9 12 h fail-closed rule does not apply to it, because the bridge is now its issuer. The bridge re-mints, from the frozen config and signed with K7, the same grants (`iss = tb:brg:<id>`, 12 h, at half-life) and the slices. Apps accept them because a Portal-signed slice named that issuer and `kid`; they trust no Portal key any more, so a later Portal compromise cannot reach them.
+4. Owner administration: the bridge `/admin/v1/*` surface exists only in standalone mode and has exactly 4 ops — `pause` / `resume` (one agent or the workspace), `revoke-connection`, `ticket` (K11 `launch` or `keys`, signed by K7). CLI: `tealbrick admin pause|resume|revoke-connection|ticket`. These ops change only the pause and connection status inside the frozen config. Each request carries an owner assertion (`typ = tb-owner-assert+jwt`, signed by a key in `ownerKeys`, `iss = sub = tb:per:<id>`, `aud = tb:brg:<id>`, `htm`, `htu`, `bd?`, ≤ 60 s, replay set); it is never accepted on MCP, OAuth or app endpoints. The owner key belongs to the K12 row (the issuer role moves to the bridge; the owner key is its admin proof); it is not a 14th kind.
+5. Not in standalone (next wave): new agents, connections (no K2, no K2b), edges, apps or policy changes.
+
+## 18. Hard rules (each is a conformance case; ids from CONFORMANCE.md)
+| Rule | Statement | Conformance |
+|---|---|---|
+| R-P1 (F4-1 class) | No person credential (K1, K3, owner assertion) is accepted at, forwarded to, or derivable at any agent path: bridge MCP, `/oauth/*`, relay, app op/hook routes, harness processes. Person and agent kinds have disjoint `typ`, `iss` and `aud`; every endpoint accepts exactly one `typ`. Portal never puts a person credential into a config, slice, instruction set or agent-facing response. | C4 (`cred.p1.bridge_rejects_clerk_jwt`, `cred.p1.bridge_rejects_tbo`, `cred.p1.relay_rejects_person`, `cred.p1.app_op_rejects_person`, `cred.p1.payload_scan_no_person_cred`, `cred.p1.tbd_agent_env_clean`, `cred.p1.kit_cannot_get_owner`), C3 (`typ` confusion) |
+| R-aud | `aud` mandatory, single string, `tb:` format, equal to the verifier's own reference; no warn-only path. | C2 |
+| R-no-1y-bearer | Longest bearer = 30 d (K3 with 24 h idle, K5 refresh), both digest-stored and server-revocable; signed tokens ≤ 12 h; proofs ≤ 60 s. | C7 |
+| R-no-shared-secret | No static secret is shared between two services (Core↔gateway, Core↔bridge, bridge↔app, app↔app). Every hop uses the caller's own credential or key-pair proof; Core trusts no identity header from the gateway. | C8 |
+| R-no-third-party-cred | Portal never hands a third-party credential (Railway, Stripe, Clerk, OAuth, API key) to an agent, app or bridge. | C8 + payload scan |
+| R-enrol-only-secret | The enrolment code is the only secret Portal writes into a customer project: one-time, ≤ 24 h, worthless after redemption. Bridges and instances generate their own key pairs; Portal stores only public keys. Public values are fine (`TB_PORTAL_URL`, `TB_PORTAL_KEYS`, bridge URL, `TB_INSTANCE_ID`). Images are public: no registry token in customer projects. | C6, C8 |
+| R-owner-draft | K3 never applies and never obtains any code or K11; no K3-reachable output type carries a credential; apply needs K1 + one confirmation. | P2 + route-table check |
+| R-device-bound | A device request is approved only by a K1 person who presents its user code (digest match); no op lists pending requests or returns a clear user code. | `cred.dev.*` (§6) |
+| R-pause-all | Every path that reaches an app has a defined pause cell (§13). | P1 |
+
+## 19. v1 failure classes and how opt2 prevents them
+| v1 failure (REG §3, BND §5, PKG §5) | opt2 prevention |
+|---|---|
+| ~40 credential kinds; 6 formats for "agent may call app" (two opaque grant tokens, attachments, leases, a JWT grant) | 13 kinds (§4); one grant K10 for agent→app and app→app; closed `typ` list |
+| 3 audience formats; `aud` warn-only | one `tb:<kind>:<id>` format; R-aud reject |
+| plaintext org identity signing key in the DB | K12 sealed (§9.1), private half destroyed on retirement |
+| deployment secrets / instance tokens written into app env, sealed copies in Core | instance and bridge generate key pairs; Portal stores public keys; R-enrol-only-secret |
+| registry read token pushed to customer projects; app-internal handoff key and Rules internal token copied between apps | public images; R-no-shared-secret; companion grants for app→app |
+| third-party tokens decrypted and returned to agents | R-no-third-party-cred; key store in the bridge (option B) |
+| owner Portal token sent to every agent endpoint (F4-1); 1-year agent JWT | R-P1; R-no-1y-bearer |
+| online grant introspection, Portal on the call path | §11 no introspection; config pull only |
+| pause covering 3 of ~9 kinds | §13 matrix, every path |
+| device codes stored in plaintext | digests (§3) |
+| two JWKS URLs; MCP OAuth hosted in Core | one key path (bootstrap + signed documents); OAuth AS = the bridge |
+
+## Checklist mapping (SPEC-REVIEW-CHECKLIST § CREDENTIALS)
+| Checklist line | Answered in |
+|---|---|
+| Exactly five caller types | §1 |
+| Every kind has a registry row (issuer key, verifier, lifetime, audience, revocation) | §4, `types/credentials.ts` `CREDENTIAL_REGISTRY` |
+| Kind count stated and short; no purpose served by two kinds | §4 (13 kinds, purpose list; K2 vs K2b disjoint) |
+| One agent→app and app→app grant: short-lived, signed, aud = instance, CRUD + scope + mode | §11, CORE §6 |
+| Grants verified locally; no introspection; key rotation | §11, §9.2 |
+| Revocation per kind (agent, key, person, device, pause): what stops, how fast | §4, §14 (incl. default-key replace) |
+| Pause mapped against every kind that reaches an app | §13 (accepted exceptions: C16 S13) |
+| No person credential at agent endpoints; conformance case | §18 R-P1, R-device-bound; §6 |
+| `aud` mandatory, one format | §3, §18 R-aud |
+| Agent, device, session, person: four identifiers with issuer and pairing flow | §2 |
+| TBD two identities; owner-CLI vs agent; apply needs browser confirmation | §12 (K3 never gets tickets) |
+| Native/CLI sign-in = device flow; sign-out revokes server side | §6, §12 |
+| Portal keys sealed; codes as digests; enrolment one-time | §9.1, §3, §4 K6, §6 |
+| No third-party creds via Portal; no Tealbrick credential in customer project | §16, §18 |
+| No app-internal or shared service secrets | §18 R-no-shared-secret, §19 |
+| Key custody: bridge key store, app-own wins, Portal sees none | §15 |
+| Standalone handover; launch ticket one-time, bound to app + person | §17, §4 K11, §12 |
+| No 1-year bearer | §18 R-no-1y-bearer |
+| Anti-patterns: ~40 kinds; owner token to agents; pause subset; Core holding third-party tokens / plaintext key / registry token | §19 |
+| Coordinator review R2 (TBD person), R3 (pairing UX), R4 (licence-last) | §12, §7 path A, §11 |
+| Verifier v0 items B2–B7, S1, S5, S9, S13, N3, N14, N15 | §6, §12, §10, §17, §11, §7–§8, §13, §9.1, §14, `types/credentials.ts` |
+
+## Open questions
+None. (Key connections without a refresh token: accepted, C15.)

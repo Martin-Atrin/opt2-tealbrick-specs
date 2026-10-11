@@ -1,0 +1,310 @@
+# MANIFEST — miniapp manifest v2 (`tealbrick.miniapp/2`)
+
+Status: v0.1, Lead · Specs, 2026-10-11. Machine-readable: `manifest.schema.json` (structure), `types/manifest.ts` (types + vocabularies), `examples/notes.manifest.json`.
+
+Scope: the manifest is the ONLY description of a miniapp: identity, discovery, runtime, operations, scopes, settings and key requirements, hooks, companions, unlocks, skills, harness hints, backups, artifacts, public routes and UI entry points. Portal Core, the bridge, the SDK, the GUI, the CLI and conformance read it through one validator package; nothing else describes an app. This file states every field's meaning and every cross-field rule (`M-*`) the validator enforces. The schema checks structure; the rules check what JSON Schema cannot. If this text and the schema disagree, the schema wins (CORE §0).
+
+## 1. Document
+
+| Item | Rule |
+|---|---|
+| File | `tealbrick.manifest.json` at the app repo root. The SDK serves it verbatim at `GET <internalUrl>/tb/v1/manifest`; CI attaches the same bytes to the release. |
+| Version | `schema: "tealbrick.miniapp/2"`, the only accepted value. No `legacy`/compat values, no negotiated version header (CORE §11). |
+| Strictness | Every object is closed (`additionalProperties: false`), except the JSON Schemas inside `operations[].input/output`. No `x-` extensions. |
+| Size | ≤ 256 KiB of JCS bytes; ≤ 128 operations. |
+| Digest | `manifestDigest = "sha256:" + hex(sha256(JCS(manifest)))` over the whole document as served (RFC 8785, CORE §3). The Manifest Store keeps the verbatim document; the workspace config carries only the digest; the bridge fetches `/tb/v1/manifest` and checks the digest (CORE §13). |
+| `version` | SemVer 2.0 (no build metadata). Its major is the licence major used by `isEntitled(workspace, product, major)`. |
+| `sdkMajor` | The SDK major the app is built with. The SDK refuses to boot if it differs from its own major. Portal and the bridge accept apps whose `sdkMajor` is the current SDK major or the one before; older majors are removed by plan (CORE §11, CONFORMANCE version matrix). |
+
+**Release info lives in the Release Registry, not here.** The manifest has NO `channel`, image reference, image digest, `releaseId`, `publishedAt` or upgrade rule. CI builds the image from `runtime.build` and writes a signed release record `{releaseId, productId = manifest.id, version = manifest.version, channel, manifestDigest, image@sha256, skills archive digest}`. A deployment points to a release id; the manifest is identical across channels.
+
+| Rule | Check |
+|---|---|
+| M-DOC-1 | No key material, tokens or credentials in any string (PEM headers, JWS-shaped `eyJ…`, long `tb*_` tokens) → `secret_material`. |
+| M-DOC-2 | Literal URLs (`scheme://`) only in `$schema`, `publisher.url`, `source.repo`, `artifacts[].url` and inside operation JSON Schemas → else `url_not_allowed`. |
+| M-DOC-3 | No customer, workspace or instance identifiers (`<prefix>_<ULID>` per CORE §1) anywhere → `instance_id_in_manifest`. |
+
+## 2. Vocabularies (defined once)
+
+Declared as `as const` arrays in `types/manifest.ts` (package `@opt2-tealbrick/spec`) and re-exported by `@opt2-tealbrick/manifest`; Core, bridge, SDK, GUI and CLI import them and hold no literals of their own (CORE §7).
+
+| Name | Values |
+|---|---|
+| CRUD actions | `create`, `read`, `update`, `delete` |
+| Effects (ordered) | `read` < `write` < `outward` < `destructive` < `money` |
+| Hold families | `first_contact`, `profile_change`, `live_call`, `destructive`, `money` |
+| Agent modes | `free`, `bound` |
+| Hook phases | `before`, `context`, `after` |
+| Idempotency | `required`, `supported`, `none` |
+| Audiences (declared once) | `agent` (any bridge caller: agent or companion app), `person` (the owner in the app UI). Bridge-only SDK calls (catalog, resolve, mark, scope summary) are bridge ops `POST /tb/v1/bridge/<bop>` with a bridge-op call proof (CREDENTIALS `CallProofBridgeOpClaims`, `verifyBridgeOpProof`), not an audience. |
+
+Meaning of effects: `read` = no state change; `write` = changes app-internal state only; `outward` = reaches a third party (sends, posts, calls); `destructive` = deletes or irreversibly overwrites (an overwriting op MUST declare `delete` in `crud`, M-OP-3); `money` = spends or moves money (always held, CORE §7).
+
+## 3. Identity and discovery
+
+| Field | Type / limit | Meaning |
+|---|---|---|
+| `id` | `^[a-z][a-z0-9-]{1,31}$` | Product id (CORE §1). Data only; no code branches on it. |
+| `name`, `summary`, `description?` | ≤ 40 / ≤ 160 / ≤ 4000 chars | Catalog card, detail text (markdown), generated docs. |
+| `publisher` | `{name, url?}` | Shown in catalog. |
+| `source` | `{repo: https URL, license: SPDX}` | Public source repo and its open-source licence. |
+| `icon` | `{svgPath, viewBox = "0 0 24 24"}` | One SVG path `d` string (path commands and numbers only). The GUI draws it in its own `<svg>` with brand colours; no markup or remote asset is ever rendered. |
+| `discovery.category` | enum (schema) | Catalog grouping. |
+| `discovery.intents` | 1–60 phrases, 3–80 chars | Search phrases ("add memories"). Core delivers them in the catalog; the GUI adds its own action intents. |
+| `discovery.keywords` | ≤ 30 | Extra search terms. |
+
+| Rule | Check |
+|---|---|
+| M-ID-1 | `source.license` is a valid SPDX expression; `NONE`/`NOASSERTION` refused → `license_invalid`. |
+| M-ID-2 | Intents unique after trim + lower-case → `intent_duplicate`. |
+
+## 4. Runtime
+
+The app container is always built from source: `runtime.build {context, dockerfile}` (repo-relative). CI pins the result by digest in the release record.
+
+| Field | Meaning |
+|---|---|
+| `port` | Container HTTP port (1024–65535) on the private network. |
+| `healthPath` | Default `/tb/v1/health` (SDK-served). |
+| `resources {cpu, memoryMb}` | Requested size; input to the Railway cost estimate shown before deploy (Core sums app + selected services + volume sizes with its own price table). |
+| `volumes[] {id, mountPath, sizeGb, purpose}` | `purpose: data` or `backup`. |
+| `env[]` | Non-secret environment, each entry exactly one of `value` (literal or service template), `setting` (a non-secret setting key), `generate: "secret"` (see below). Names `^[A-Z][A-Z0-9_]{1,63}$`; `TB_*` and `RAILWAY_*` are reserved for the platform. |
+| `services[]` | Companion containers in the same private network (below). |
+
+`runtime.services[]` fields: `id` (kebab, used as private hostname stem), `title?`, exactly one of `image` (pinned `repo[:tag]@sha256:<64 hex>`, upstream unmodified) or `build` (thin layer built by the app's CI, e.g. FROM a pinned upstream image), `port`, `resources`, `volumes?` (data only), `health` (`{kind:"http", path}` or `{kind:"tcp"}`), `env?`, `when?` (setting condition, §7), `startOrder` (ascending; ties start in parallel; the app container starts last), `backup?` `{dump, restore, extension}` (argv run inside the service, §11), `helper?` `{port, paths[]}` (DECISION-LOG C6: an app-owned internal HTTP helper in the thin layer, started by the `tb-exec` wrapper, reachable only on the private network and only by its own app instance with an instance assertion (K8); never exposed through the bridge).
+
+Keys a service needs are the `settings.keys[]` whose `usedBy` names the service (one source; §7). `tb-exec` fetches them from the bridge with the service's own instance key and execs the upstream command with each key as an env var of the same name (CORE §10).
+
+`generate: "secret"` ("not ours" per CORE I3, not a credential kind) asks the provider to generate a random value at first deploy (Railway: `${{secret(48)}}`) for credentials between an app and its own services (e.g. a database password). Portal never reads, stores or relays the value. Other containers reference it by `{{services.<id>.env.<NAME>}}`.
+
+Env value templates (the only `{{…}}` forms allowed): `{{services.<id>.url}}` (`http://<private host>:<port>`), `{{services.<id>.host}}`, `{{services.<id>.port}}`, `{{services.<id>.env.<NAME>}}`. The deploy recipe omits an entry whose referenced service is not deployed (its `when` is false).
+
+| Rule | Check |
+|---|---|
+| M-RT-1 | `runtime.volumes` has exactly one `purpose: backup`; service volumes are `data` only → `backup_volume`. |
+| M-RT-2 | Volume ids unique across app + services; mount paths unique per container and not nested → `volume_conflict`. |
+| M-RT-3 | Service ids unique and ≠ `app` → `service_duplicate`. |
+| M-RT-4 | Env names unique per container; `setting` names a declared field; templates name a declared service, and `.env.<NAME>` names a `generate` entry of that service → `env_ref_invalid`. |
+| M-RT-5 | An env name matching `SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE|API_?KEY|CREDENTIAL` must use `generate` or a `{{services.*.env.*}}` reference; no env name equals a `settings.keys[].name` (keys never travel through Portal or env) → `secret_env_literal`. |
+| M-RT-6 | A service with `backup`, `helper`, or any key in its `usedBy` must use `build` (it needs the `tb-exec` entrypoint) → `wrapper_required`. |
+| M-RT-7 | `helper.port` ≠ service `port` → `helper_port`. |
+| M-RT-8 | `when` follows M-ST-3 (enum/boolean fields only). |
+
+## 5. Operations
+
+### 5.1 Fields
+| Field | Meaning |
+|---|---|
+| `id` | `^[a-z][a-z0-9_]{1,39}$`, not starting `tb_`. MCP tool name = `<product>__<id>`. |
+| `title`, `description` | MCP tool title/description, OpenAPI summary, docs. |
+| `input`, `output` | JSON Schema 2020-12 with `type: "object"`; local `$ref` only. JSON only: no file/binary inputs in opt2 (C11). |
+| `crud` | Non-empty subset of CRUD actions. Checked by the bridge `gate()`: `op.crud ⊆ grant.crud`; by the app `authorize()`: `op.crud ⊆ grant.crud ∩ scope access.crud` (CORE §7). |
+| `effect` | Separate field from `crud`. Drives holds, receipts, MCP annotations (`readOnlyHint` = read, `destructiveHint` = destructive). |
+| `holdFamily?` | The family `authorize()` compares with `grant.held`. Free caps are Agent Policy values carried in the grant (CORE I14), never manifest fields; the app counts them per (agent, effect). |
+| `scopeType?` | The scope type whose access applies (§6). |
+| `idempotency` | `required`: caller must send an idempotency key; `supported`: optional; `none`. SDK keeps keys in the receipts table: same key + same input digest → same result; different input → 409 `idempotency_conflict`. |
+| `receipt` | `true` → the SDK writes a receipt for every executed call (inputDigest + app-redacted summary, never raw bodies). |
+| `audience` | `agent` → reachable through the bridge (MCP, relay, app→app), becomes an MCP tool. `person` → only from the app UI in a person session (launch ticket); never an MCP tool, never hooked, never a companion target. |
+| `dynamic?` | Dynamic tool family (§5.3). |
+
+### 5.2 Rules
+| Rule | Check |
+|---|---|
+| M-OP-1 | Ids unique. Every derived MCP tool name ≤ 64 chars (CORE I9): `<product>__<id>` for `agent` ops; for search mode also `<product>__<id>_search` and `<product>__<id>_call` → `tool_name_too_long`. List-mode entry names (`<product>__<entry.name>`) are checked by the SDK when it serves the catalog (same limit). |
+| M-OP-2 | `effect = read` ⇔ `crud = ["read"]` → `effect_crud_mismatch`. |
+| M-OP-3 | `delete ∈ crud` ⇒ `effect ∈ {destructive, money}`; `effect = destructive` ⇒ `delete ∈ crud` (so an irreversible overwrite declares `delete`, e.g. `["update","delete"]`) → `effect_crud_mismatch`. |
+| M-OP-4 | `holdFamily`: absent for `read`/`write`; `= destructive` for `destructive`; `= money` for `money`; optional for `outward`, one of `first_contact|profile_change|live_call` → `hold_family_invalid`. |
+| M-OP-5 | `create ∈ crud` ⇒ `idempotency = required`; `crud = ["read"]` ⇒ `idempotency ≠ required` → `idempotency_invalid`. |
+| M-OP-6 | `effect ∈ {outward, destructive, money}` or `holdFamily` set ⇒ `receipt = true` → `receipt_required`. |
+| M-OP-7 | `scopeType` names a declared scope; the union of that scope's `access[].crud` ⊇ `op.crud` → `scope_ref_invalid`. |
+| M-OP-8 | Non-dynamic `agent` ops declare `input` and `output`. Embedded schemas: no remote `$ref`, no `$id`, no `contentEncoding`/`contentMediaType` → `io_schema_invalid`. |
+| M-OP-9 | `audience = person` ⇒ no `dynamic` → `person_dynamic`. |
+| M-OP-10 | `dynamic` ⇒ `crud = ["read"]`, `effect = read`, no `holdFamily`, `idempotency = supported`, `receipt = false`, `audience = agent`, no `input`/`output`; `crudCeiling = ["read"]` ⇒ `effectCeiling = read` → `dynamic_invalid`. |
+
+### 5.3 Dynamic operations (the engine-tool gap)
+Some apps expose tool sets that are not known at build time: an engine with ~100 native operations that depend on the chosen engine version, or a connector catalog with thousands of third-party tools. Listing each as a manifest operation is impossible; one generic "call anything" operation would hide each tool's CRUD class and effect. A dynamic operation closes the gap with one mechanism (CORE §13):
+
+- The manifest op declares the family and its ceilings: `dynamic: {mode, crudCeiling, effectCeiling}`. The op's own `crud`/`effect` (`["read"]`/`read`) describe discovery only.
+- The app serves, through the bridge op `POST /tb/v1/bridge/catalog`, a catalog of `DynamicCatalogEntry {name, title, description, inputSchema, crud, effect, holdFamily?}` (types/manifest.ts). Each entry obeys M-OP-2…4 and the ceilings (`crud ⊆ crudCeiling`, effect ≤ `effectCeiling` in the effect order).
+- `mode: "list"` (≤ 256 entries): the bridge shows each entry as its own MCP tool `<product>__<entry.name>` (names unique within the app, not colliding with static op ids).
+- `mode: "search"`: the bridge shows `<product>__<op>_search` (input `{query, limit?}`, returns entries) and `<product>__<op>_call` (input `{tool, arguments}`).
+- Every call goes to `POST /tb/v1/ops/<op>` with input `DynamicCallInput {tool, arguments}`. Before `gate()` and hooks the bridge resolves the concrete tool's `{crud, effect, holdFamily}` via the bridge op `POST /tb/v1/bridge/resolve` (cacheable 5 min) and gates, hooks, authorizes and receipts with the resolved values. The effect never comes from the agent. A resolution outside the ceilings → refuse `dynamic_ceiling_exceeded`; a resolved non-read call always gets a receipt.
+- Wire details: BRIDGE.md and SDK-API.md.
+
+### 5.4 Standard operations (every SDK app, automatic) and reserved names
+| Id | Audience | CRUD / effect | Surface |
+|---|---|---|---|
+| `tb.hold_status` | agent | read / read | MCP `<product>__tb_hold_status` (poll a held call by `holdId`) |
+| `tb.holds_list` | person | read / read | app UI (hold popup) |
+| `tb.holds_decide` | person | update / write | app UI: approve or reject one hold, once (no standing grants, C8) |
+| `tb.receipts_list` | person | read / read | app UI |
+| `tb.agents_list` | person | read / read | app UI: slice agents with their scope access |
+| `tb.scopes_set` | person | update / write | app UI (Configure): set one agent's access to one scope instance (audited) |
+| `tb.keys_status` | person | read / read | app UI: key names, required, present, source (no values) |
+| `tb.key_set` / `tb.key_delete` | person | update / write · delete / write | app UI: app-own keys only; values never returned or logged |
+| `tb.export` | person | read / read | app UI: export archive (§11) |
+
+Input/output shapes: SDK-API §6. The canvas scope summary is not a standard op: the bridge fetches it with the bridge op `POST /tb/v1/bridge/scope-summary` (≤ 80-char label per agent, no third-party identifiers) for its status report. `tb.hold_status` needs only a valid grant; agent edges need not include `read` (CORE I4); it returns only the caller's own holds and writes no receipt. Reserved: the `tb.` namespace (including the bridge-served read tool `<product>__tb_skills`, BRIDGE) and the `tb_` prefix for operation, hook, scope, step, setting, volume, unlock and artifact ids; `tb-` for service and skill ids; `TB_`/`RAILWAY_` env and key names; the `/tb/` path prefix inside the app (ui paths, public routes, helper paths). The schema enforces these patterns.
+
+## 6. Scopes
+
+A scope type is an app-declared sub-resource for grants (Connect: accounts; Knowledge: areas). Instances live in the app; the app is the authority for scope assignments (CORE §6). Portal stores only the edge CRUD + mode and shows the summary label; it never sees scope instances.
+
+| Field | Meaning |
+|---|---|
+| `type`, `label`, `labelPlural` | Id and display names. |
+| `access[] {id, label, crud}` | Access levels for this type, each mapping to a CRUD set. `authorize()` maps an assignment's level → `crud`. |
+| `defaultGrants[] {kind, access}` | Assignments the SDK creates when an edge to a caller first appears (C1). `own` = the caller's own instance (the app creates it if absent); `shared` = instances the app marks shared; `all` = every existing instance. An empty list = nothing until the owner assigns in Configure. |
+| `summaryTemplate` | Used by the SDK default scope-summary bridge op (`/tb/v1/bridge/scope-summary`); variables `{count}`, `{label}`, `{labelPlural}`, `{access.<id>}` (count per level). Apps may override the summary in code; output ≤ 80 chars. |
+
+| Rule | Check |
+|---|---|
+| M-SC-1 | Types unique; access ids unique within a type → `scope_duplicate`. |
+| M-SC-2 | `defaultGrants[].access` names an access id of the same scope; kinds unique within a scope → `default_grant_invalid`. |
+| M-SC-3 | `summaryTemplate` uses only the listed variables with declared access ids → `template_invalid`. |
+| M-SC-4 | `scopes` non-empty ⇒ `ui.configurePath` present (scopes are edited in the app) → `configure_ui_required`. |
+
+## 7. Settings and key requirements
+
+Settings are non-secret values chosen at deploy (and later, if `mutable`). Core stores them per instance; they reach the app (and services) ONLY as env through `runtime.env[].setting`, written by the deploy recipe at (re)deploy. `instances.update {settings}` redeploys the instance. Settings are never in the instance slice (instance-slice.schema.json). A field no `env[].setting` references is a Portal-form value only and does not reach the app (M-ST-7). The deploy popup and settings form are generated from this section; the GUI has no per-app code.
+
+- `steps[] {id, title, help?, when?, fields[]}`: array order is the popup order (Next/Previous). A step whose `when` is false is skipped.
+- `fields[] {key, type, label, help?, required?, default?, choices?, min?, max?, maxLength?, pattern?, when?, mutable = true}`; `type ∈ string|text|integer|number|boolean|enum|url`. `choices[] {value, label, note?, disabled?}`: a disabled choice is shown greyed ("coming later").
+- `when` (fields, steps, keys, services, skills): `{ "<setting key>": value | [values] }`, all entries must match (AND; array = one of).
+- `keys[] {name, label, provider, help?, required, source, usedBy[], when?, step?}`: key requirements. Portal never receives values; it shows only the presence booleans the bridge reports per name. The popup shows each key in its `step` (else in a generated final "Keys" step) with a button that opens the bridge key page through a `pur: keys` ticket (CORE §10). `source: account_default` = served by the workspace bridge key store (GUI label "workspace default key"; the value stays `account_default`; J2 enters it once per workspace), and the app may also accept an app-own value, which then wins (SDK `getKey`); `source: app_own` = entered and stored only in the app's own UI. `usedBy` = `"app"` and/or service ids; the bridge serves a key only to the consumers named here.
+
+| Rule | Check |
+|---|---|
+| M-ST-1 | Step ids, field keys (across all steps) and key names unique → `setting_duplicate`. |
+| M-ST-2 | `type = enum` ⇔ `choices`; `default` matches the type and constraints; an enum default is a non-disabled choice; `url` has no default; `maxLength`/`pattern` only on string/text/url; `min`/`max` only on number/integer → `setting_invalid`. |
+| M-ST-3 | `when` keys name an enum or boolean field; values are valid for it; on fields and steps only fields declared earlier (array order) may be referenced (no cycles) → `condition_invalid`. |
+| M-ST-4 | A field key matching `secret|token|password|passwd|private|api_?key|credential` → `secret_setting` (declare it in `keys`). |
+| M-ST-5 | `usedBy` items are `app` or declared service ids; `app_own` ⇒ `usedBy = ["app"]` and `ui.configurePath` present; `step` names a declared step → `key_invalid`. |
+| M-ST-6 | A field referenced by any `services[].when` has `mutable: false` (changing it would add or remove containers) → `setting_must_be_immutable`. |
+| M-ST-7 | Every field is referenced by at least one `env[].setting`, or by a `when` (fields, steps, keys, services, skills) or a skill `{{settings.<key>}}` → `setting_unused`. |
+
+## 8. Hooks
+
+A hook subscribes one of this app's handlers to the bridge chain (CORE §8). The handler is addressed by hook id: `POST <internalUrl>/tb/v1/hooks/<hookId>`; a hook is not an operation and never an MCP tool.
+
+| Field | Meaning |
+|---|---|
+| `id`, `title` | Id; title shown on the canvas, where the owner may disable each subscription. |
+| `phase` | `before` (gate `{allow, reason?}`), `context` (adds `{ "<product>.<key>": JSON }`), `after` (`{output?, redactions?}`). |
+| `order` | Integer −1000…1000. Chain: before → context → target → after; within a phase ascending `order`, then product id. |
+| `match {products, operations?, effects?}` | Target calls the hook sees; all present criteria must match. `products: ["*"]` = every product. Dynamic calls match on the resolved effect. |
+| `timeoutMs` | ≤ 2000 (default 2000). `before`/`context` error or timeout → the call is refused (fail closed). `after` failure → output withheld, receipt marked `after_failed`. |
+
+Hooks match only `agent`-audience manifest operations reached through the bridge; never standard `tb.*` ops, person ops or hook calls (hook calls never trigger hooks). Core resolves chains into the workspace config; a subscription is active once the declaring app is deployed and licensed (CORE §13).
+
+| Rule | Check |
+|---|---|
+| M-HK-1 | Ids unique → `hook_duplicate`. |
+| M-HK-2 | `"*"` appears alone in `products` → `hook_match_invalid`. |
+| M-HK-3 | `operations` only when `products` is exactly one product id; for the own id the ops exist with audience `agent` (other products: checked by Core at chain resolution) → `hook_match_invalid`. |
+
+## 9. Companions, unlocks, agent directory
+
+- `companions[] {product, operations, crud, purpose}`: app→app needs. For each entry Core mints the ONE grant (K10) with `sub = tb:ins:<this>`, `aud = tb:ins:<target>`, `crud = crud`, `mode = bound`, `wf = operations` (CORE I8), once both apps are deployed in the workspace (licence rule per CORE §6). `purpose` is shown on the canvas.
+- `unlocks[] {id, title, requires, provides {operations?, skills?}}`: features of THIS app that exist only when the companion product `requires` is deployed in the same workspace. The bridge hides the listed operations from MCP lists and Core leaves the listed skills out of the bundle until then. Unlocks are never licence features: the licence gates only Portal management in Core (deploy, grants, launch, updates); an app behaves the same licensed, unlicensed or self-hosted. No manifest field expresses "licence-only features".
+- `needsAgentDirectory` (default false): the instance slice lists all workspace agents, not only those with an edge (CORE §13).
+
+| Rule | Check |
+|---|---|
+| M-CP-1 | Companion products unique and ≠ own id → `companion_invalid`. |
+| M-CP-2 | `validateCompanions(m, targets)` (Core at deploy, conformance): target ops exist with audience `agent`; each `op.crud ⊆ crud`; `crud ⊆ ∪ op.crud` → `companion_op_invalid`. |
+| M-UL-1 | Unlock ids unique; `requires ∈ companions[].product`; `provides` names own operations / skills → `unlock_invalid`. |
+
+## 10. Skills and harness hints
+
+- `skills[] {id, title, file, when?}`: `file` is a repo-relative `SKILL.md` (YAML frontmatter `name` = id, `description`; markdown body). Allowed variables: `{{agent.name}}`, `{{agent.id}}`, `{{workspace.name}}`, `{{settings.<key>}}`, `{{scope.<type>.<kind>}}` (label of the caller's default-grant instance of that kind). CI packs the files into the release's skills archive (`skillsDigest` in the release record, C17). Content is sanitized once: `validateAppFiles` in CI for app files, and Core's render for owner overrides; the bridge does no content filtering. One function `renderSkill(file, vars)` in `@opt2-tealbrick/manifest` substitutes variables; Core uses it for the workspace bundle (workspace variables, owner overrides) and the bridge for per-agent variables `{{agent.*}}` only. The bridge and serves skills as MCP resources plus an index in `initialize.instructions` (CORE §13).
+- `harnessHints[] {harness, instructions ≤ 1000}`: short plain-text notes per harness kind (`generic` applies to all). They feed the generated instruction set and kit README. No harness-specific code, config or commands.
+
+| Rule | Check |
+|---|---|
+| M-SK-1 | Skill ids and files unique; `when` per M-ST-3 → `skill_invalid`. |
+| M-SK-2 | `validateAppFiles` (CI, CLI): each file exists, frontmatter matches, only allowed variables, `{{settings.<key>}}` names a declared field; content sanitized (no raw HTML/script, no MCP-directive or tool-call markup, ≤ 64 KiB) → `skill_file_invalid`. |
+| M-HH-1 | One hint per harness kind → `hint_duplicate`. |
+
+## 11. Backups and export
+
+The SDK backup runner (inside the app container) runs on `backups.schedule` (5-field cron, UTC) and keeps `retain` archives on the backup volume. One archive `tb-backup-<UTC timestamp>.tar.gz` contains: `meta.json` (product, version, manifestDigest, sdk version), the SDK-managed database (app tables, receipts, holds, idempotency keys), each `backups.files[] {volume, path}` (paths in app data volumes), and one `services/<id>.<extension>` per deployed service with `backup`, produced by running `backup.dump` inside the service through `tb-exec` and streaming stdout over the private network. Restore runs `backup.restore` with the file on stdin. A restore test is part of conformance.
+
+`tb.export` produces `tb-export-<timestamp>.tar.gz`: `meta.json` + one JSONL file per exported table (SDK database) + `receipts.jsonl`, written to the backup volume and downloadable from the app UI. The export format is SDK-defined and the same for every app; there is no manifest field for it.
+
+| Rule | Check |
+|---|---|
+| M-BK-1 | `files[].volume` names an app `data` volume; cron fields in range → `backup_invalid`. |
+
+## 12. Artifacts, public routes, UI
+
+- `artifacts[] {id, version, sha256, url}`: pinned data the app downloads (e.g. a connector catalog). Assets are GitHub release assets of the app repo; the app verifies `sha256` before use.
+- `publicRoutes[] {path, purpose}`: the bridge exposes only these at `https://<bridge>/p/<product><path>`, unauthenticated; the app verifies them (OAuth `state`, provider signature). `oauth_callback` accepts GET; `webhook` accepts POST.
+- `ui {launchPath, configurePath?}`: paths under `https://<bridge>/a/<product>/`. A launch ticket opens `launchPath` (double-click on the canvas opens `configurePath` if present). This is the only settings/frontend entry the GUI needs; a new app needs zero GUI change. No `ui` → the app has no person UI: no double-click, no Configure, no launch ticket (the GUI hides them).
+
+| Rule | Check |
+|---|---|
+| M-AR-1 | Artifact ids unique; `url` starts with `<source.repo>/releases/download/` → `artifact_invalid`. |
+| M-PR-1 | Public route paths unique → `route_duplicate`. |
+
+## 13. One validator package
+
+`@opt2-tealbrick/manifest` (REPOS.md) is the only implementation, used by Core (Manifest Store, catalog, deploy), the SDK (boot), the bridge (config apply), the CLI and conformance. Nobody re-implements a rule. Surface: `validateManifest(input): ManifestValidation` (schema + all `M-*` rules; issues `{path (RFC 6901), rule, code, message}`), `manifestDigest(m)`, `validateCompanions(m, targets)`, `validateAppFiles(m, repoDir)` (CI/CLI only), `renderSkill(file, vars)` (§10), the vocabularies (§2), plus `verifyGrant`, `verifyBridgeOpProof`, `gate`, `authorize` (CORE §7). Warnings do not exist: a rule passes or the manifest is refused.
+
+## 14. Generated artifacts (no hand-written copies)
+
+| Artifact | Generated by | From |
+|---|---|---|
+| MCP tools (names, schemas, annotations) | bridge at run time | operations, dynamic catalogs, unlocks, grants |
+| OpenAPI 3.1 (`GET /tb/v1/openapi.json`, docs) | SDK | operations, standard ops |
+| Portal deploy popup + settings forms | GUI from Core catalog | settings, keys |
+| Catalog entry, cost estimate | Core | identity, discovery, runtime, ui |
+| Deploy recipe (Railway services, volumes, env, order) | Core | runtime |
+| Per-app kit package (typed client + README for SDK harnesses) | SDK codegen in app CI | operations, harnessHints |
+| Skills bundle inputs | app CI → Core | skills |
+| Docs (operations, settings, scopes reference) | SDK codegen | whole manifest |
+
+Hand-written OpenAPI files, `recipe.json`, extra `manifest.json`, status/bootstrap descriptors, operation lists in the GUI or Core, or copied settings forms are forbidden. Conformance runs a drift check (generated = manifest) in the one CI pipeline.
+
+## 15. Examples (illustrative only — not products)
+
+The full EXAMPLE is `examples/notes.manifest.json` (generic notes app: 7 agent ops + 1 person op, one scope with defaults, settings with a conditional step and a greyed choice, an account-default key, a companion service with a generated secret, a hook, a companion + unlock, skills, backups, an artifact, a webhook, UI). It validates against `manifest.schema.json`.
+
+EXAMPLE fragment — scope with tiers (Connect-like):
+```json
+{ "type": "account", "label": "Connected account", "labelPlural": "Connected accounts",
+  "access": [
+    { "id": "read", "label": "READ", "crud": ["read"] },
+    { "id": "read_update", "label": "READ/UPDATE", "crud": ["read", "create", "update"] },
+    { "id": "read_update_delete", "label": "READ/UPDATE/DELETE", "crud": ["read", "create", "update", "delete"] } ],
+  "defaultGrants": [],
+  "summaryTemplate": "{count} {labelPlural}" }
+```
+EXAMPLE fragment — dynamic search op (thousands of third-party tools):
+```json
+{ "id": "tools", "title": "Third-party tools", "description": "Search and call connected service tools.",
+  "crud": ["read"], "effect": "read", "scopeType": "account", "idempotency": "supported",
+  "receipt": false, "audience": "agent",
+  "dynamic": { "mode": "search", "crudCeiling": ["read", "create", "update", "delete"], "effectCeiling": "money" } }
+```
+MCP: `connect__tools_search`, `connect__tools_call`. EXAMPLE list mode (engine ops): `"dynamic": {"mode": "list", "crudCeiling": ["read","create","update"], "effectCeiling": "write"}` → one MCP tool per engine operation.
+
+## Checklist mapping (SPEC-REVIEW-CHECKLIST § MANIFEST)
+| Checklist line | Answered in |
+|---|---|
+| CRUD class AND effect as separate fields | §5.1, M-OP-2…4 |
+| Manifest is the only place for ops, scopes, settings/keys, hooks, skills, hints, unlocks, backups | Scope, §4–§12, §14 |
+| Every generated artifact listed; hand-written copies banned | §14 |
+| Scopes app-declared; edge = CRUD + declared scope only | §6, §9 (companion grant) |
+| Hold families and Free/Bound vocabulary from manifest/SDK | §2 |
+| Hooks: phase, order, before fails closed | §8 |
+| Settings/frontend entry the GUI opens | §12 `ui` |
+| Keys: account default vs app-held, no values to Portal | §7 keys, M-RT-5, M-ST-5 |
+| Discoverable engine tool list with per-tool class | §5.3 |
+| One schema version, no legacy, no negotiated header, SDK current+1 rule | §1 |
+| One validator package for Core, SDK, bridge, conformance | §13 |
+| No product name inside the schema | `manifest.schema.json` (product names only in §15 examples) |
+| Idempotency and receipt declared per operation | §5.1, M-OP-5, M-OP-6 |
+
+## Open questions
+None. v0.1 review items applied: S6 (§7), S8 + N6 (§10, §13), N1 (§2, §5.4), N4 (schema `$id`), N7 (§2, M-OP-3), N9 (§12), N13 (§7). v0 questions resolved in CORE §14 (I3, I8, I10; `tb-exec` static binary owned by SDK-API; hook handlers addressed by hook id; skills-archive digest filed with Lead · Platform by the Coordinator).
