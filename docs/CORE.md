@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.1 → v0.1.3 (additive; C31, C33, C35, C38)
+- C31/C33 SDK context fields and `onStart` in types/sdk.ts; C35 eleven SPEC-GAP clarifications (MANIFEST, BRIDGE, SDK-API v0.1.3 sections), `TB_KEK` exactly 32 bytes; C38 bridge release `runtime` record + `RAILWAY_RUN_UID=0`. (spec 0.1.1 tarball withdrawn; content shipped as 0.1.2.)
+
 ## Changelog v0.1 → v0.1.1 (additive; C21, C24, C26, C28–C30)
 - C21 manifest package exports (seal/unseal, key export/import, opaque values, ulid, raw digest, generic assertions, `validateInput`); C26 `signJwsWithSigner` + `DeviceAgentTokenResult.bridge_id`; C28 one volume per service, `TB_BACKUP_DIR=<data mount>/backup`; C29 release `source {repo, ref, dockerfile}` on dev only; C30 `TYP.releaseIndex` + `ReleaseIndexClaims`; C24 TBD items (REQUESTS.md).
 

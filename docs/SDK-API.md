@@ -198,6 +198,10 @@ Person and system actions only (agent calls are receipts): `id aud_…, at, acto
 - Control port `7077` (constant, private network only) accepts only requests carrying an instance assertion from its own app (verified with that public key): `POST /tb/v1/exec/backup` runs `backup.dump` and streams stdout; `POST /tb/v1/exec/restore` runs `backup.restore` with the body on stdin.
 - Helper (C6): a service that declares `helper { port, paths[] }` ships an app-owned helper process in its thin layer; `tb-exec` starts it beside the upstream command and lets through only the declared paths on `helper.port`, after verifying the same instance assertion. App side: `callServiceHelper(serviceId, path, body)` signs the assertion and POSTs JSON; an undeclared path throws `helper_path_undeclared` locally.
 
+- v0.1.3 (C33): `tb-exec` is a Node bin shipped by `@opt2-tealbrick/miniapp-sdk` (the thin layer installs Node + the package). Flags: `tb-exec [--helper-cmd "<cmd>" --helper-target 127.0.0.1:<port>] -- <upstream...>`; `--helper-cmd` starts the helper process, `--helper-target` is where the authenticating proxy on `helper.port` forwards declared paths.
+- v0.1.3 (C33): `defineApp({ onStart(ctx: { db, log, scopes, getKey, callServiceHelper }) })` runs once after boot + claim. `callServiceHelper(serviceId, path, body)` = JSON POST to the service helper on the private network with an instance assertion (`TB-Assert`, htm/htu/bd), timeout, error envelope.
+- v0.1.3 (C31): `OpContext.publicUrl` (from slice `bridge.publicUrl`), `OpContext.workspace`, `scopes.instances` on person-op and public-route ctx, and `ctx.secrets { put, get, delete }` sealed under `TB_KEK` (AAD = name; excluded from export, sealed in backups) — THE app-secret mechanism.
+
 ## 12. Standalone
 | Case | What changes for the SDK |
 |---|---|
@@ -277,3 +281,11 @@ Every name below is a runtime export with a declaration in `types/sdk.ts`; each 
 
 ## Open questions
 None open. Resolved at v0.1: the scope summary is the bridge op `scope_summary` only and is not in `STANDARD_OPERATIONS` (10 ids; the `tb.` prefix stays reserved by the manifest id rules).
+
+## v0.1.3 clarifications (C35)
+- Idempotency keys live in `tb_idempotency` (also for `receipt: false` ops); results sealed, 24 h.
+- Companion (app) callers' scope rows are keyed by instance id, manifest default grants applied on first call.
+- Standard person-op outputs: lists `{items, nextCursor}`, `tb.agents_list` `{agents}`, `tb.keys_status` `{keys}`, mutations `{ok}`.
+- SDK 0.x counts as manifest `sdkMajor` 1 until SDK 1.0.
+- `TB_KEK`: exactly 32 bytes, base64url (43 chars) or hex (64 chars); KEK id = non-secret fingerprint `kek_<16 hex>`. Grant failures use `grant_invalid | grant_expired | grant_revoked`; other token failures `invalid_token`. Backup/export failures: `backup_failed`, `export_failed`. App tables export as `tables/<name>.jsonl`.
+- `onStart`, `ctx.publicUrl`, `ctx.workspace`, `ctx.scopes.instances`, `ctx.secrets` are now in types/sdk.ts (C31/C33).

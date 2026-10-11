@@ -380,3 +380,7 @@ Auth: B = browser, O = owner native session, pub = public, dev = device, brg = b
 1. **Licence per major** (N12, waits on Martin): `isEntitled(ws, product, major)` means a new major needs a new licence, while PRD §1 says "updates free while on licence". Recommendation: keep per-major licences (one licence kind, no version deciders) and say so in offer and website copy; Martin decides (TODO in §2.1).
 
 Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairing` (I7), own-infra enrolment live (I16), caps shape (I14), device-poll errors in our envelope (C15), instance removal (I15), offers in the signed release index (C17), device-flow path and wire (B6: this file + routes.ts are the source).
+
+## v0.1.3 additions (C38)
+- Bridge release records carry a `runtime` record (ports, health paths, volume + backup directory, env names each with `source: portal | provider-secret | public-url | fixed`) because the bridge has no app manifest; format in `opt2-tealbrick-platform` `registry/README.md`.
+- The Railway adapter sets `RAILWAY_RUN_UID=0` on services that mount a volume.

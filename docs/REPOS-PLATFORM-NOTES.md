@@ -25,21 +25,24 @@ Remote `main` of every repo holds one initial commit (README, .gitignore, secret
 
 ## CI standard (template ci-v2) — every lead: adopt it
 - Standard + runner: `opt2-tealbrick-platform/ci/` (read `ci/README.md`). One pipeline: secret-scan, setup (template drift, `tealbrick-ci.json`, package rules, `@opt2-tealbrick/*` URL-dependency check), install, typecheck, lint, unit, conformance, build, kaniko image-check; on `v*` tags image-publish to `ghcr.io/martin-atrin/<image>` + signed release record → release registry; on `<package>-v<ver>` tags a tarball per package on the GitHub release.
+- Current template: `ci-v3` (adds the pinned manifest package for signed release records). Repos on ci-v2 keep working; re-run `adopt` to move to ci-v3 (needed only by repos that publish images: knowledge, connect, bridge, portal-core, portal-gui).
 - Adopted on main (2026-10-11 ~19:45): specs, sdk, qa, packages, platform, bridge, connect. NOT yet: knowledge, portal-core, portal-gui, website, tbd.
+- Woodpecker is LIVE for all 12 repos (2026-10-11 ~20:20): every push to main and every PR runs the pipeline. Fork PRs need approval.
 - Lead to adopt (repo already has lead commits; Platform did not touch it): knowledge, connect, bridge, portal-core, portal-gui, website, tbd. Command:
   `cd /Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-platform && node ci/tb-ci.ts adopt ../opt2-tealbrick-<name> --kind <miniapp|bridge|portal|web|desktop>` then edit `tealbrick-ci.json` (images, paths) and commit. It deletes `.woodpecker/secret-scan.yaml` (the template has that step).
 - Package rules: `"private": true` everywhere, lockfile committed, root scripts `typecheck lint test` (+ `conformance` for miniapp/bridge, + `build` in pnpm workspaces); no `tealbrick`/`@tealbrick/*` deps.
-- Woodpecker activation of the repos is pending (Platform QUESTIONS Q1); until then CI does not run on push. Local check: `CI_WORKSPACE=$PWD TB_CI_REF=ci-v2 node ../opt2-tealbrick-platform/ci/tb-ci.ts setup` in your repo.
+- Local check before pushing: `CI_WORKSPACE=$PWD TB_CI_REF=ci-v2 node ../opt2-tealbrick-platform/ci/tb-ci.ts setup` in your repo.
 - Images: `ghcr.io/martin-atrin/opt2-tealbrick-<name>[-<component>]`, public. No npm publishing; cross-repo packages = GitHub release tarball URLs (REPOS.md §5).
 
-## Deploying to Railway "opt2" (C20, C25) — every lead
-- Until the Railway GitHub app sees the Martin-Atrin repos (Coordinator is asking Martin), deploy with `railway up` ONLY from a clean working tree at a commit that is pushed to origin/main:
+## Deploying to Railway "opt2" (C32) — every lead
+- Standard path: Railway builds the service from its PUBLIC GitHub repo at a PUSHED commit SHA (no Railway GitHub app needed). One command from the platform tree:
   ```sh
-  cd /Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-<name>
-  test -z "$(git status --porcelain)" && git fetch -q && test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" || { echo "not clean/pushed"; exit 1; }
-  railway up --detach -p 15297ce5-0283-4901-a408-9c802e6ac53a -e production -s <service> -m "deploy $(git rev-parse HEAD)"
+  cd /Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-platform
+  node ops/railway-deploy.ts --service <portal-core|portal-gui|website> --repo opt2-tealbrick-<name> --sha <full 40-char sha on origin/main> [--dockerfile <path>] [--root <dir>]
   ```
-  Record the SHA in your STATUS deploy note. Services: portal-core (private), portal-gui, website. Ask Platform for a new service; do not create services yourself.
+  It refuses a SHA that is not on GitHub, sets `RAILWAY_DOCKERFILE_PATH`, points the service source at the repo and deploys exactly that commit (`serviceInstanceDeployV2(commitSha)`). Record the SHA in your STATUS deploy note. Verified 2026-10-11 on service db-backup (platform@ac202e3, build SUCCESS).
+- Fallback only (Railway API down): `railway up --detach -p 15297ce5-0283-4901-a408-9c802e6ac53a -e production -s <service> -m "deploy <sha>"` from a clean tree whose HEAD equals origin/main.
+- Ask Platform for a new service; do not create services yourself.
 - Health checks set on Railway: portal-core `GET /internal/health` (spec `system.health`; Core scaffold currently serves `/healthz`: serve the spec path or the deploy fails), website `/`. portal-gui: tell Platform your health path.
 - Errors: `SENTRY_DSN` + `SENTRY_ENVIRONMENT=opt2` are set on portal-core and portal-gui (GlitchTip, server-side PII scrubbing on). Use them; never log tokens, codes or bodies.
 - Customer workspaces (opt2-test-customer) get only releases from the signed index (registry/README.md), never `railway up`.

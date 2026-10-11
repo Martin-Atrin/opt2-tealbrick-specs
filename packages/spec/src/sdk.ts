@@ -345,6 +345,31 @@ export interface OpContext {
   db: Db;
   log: Logger;
   signal: AbortSignal;
+  /** v0.1.3 (C31): bridge public origin from the slice (`bridge.publicUrl`); null until known */
+  publicUrl: string | null;
+  /** v0.1.3 (C31) */
+  workspace: WorkspaceId;
+  /** v0.1.3 (C31): create scope instances outside events.agentAdded (person ops, public routes) */
+  scopes: Pick<ScopeStore, "instances">;
+  /** v0.1.3 (C31): THE app-secret mechanism */
+  secrets: AppSecrets;
+}
+
+/** v0.1.3 (C31): app secrets sealed under TB_KEK (AAD = name); excluded from export, sealed inside backups. */
+export interface AppSecrets {
+  put(name: string, value: string): Promise<void>;
+  get(name: string): Promise<string | null>;
+  delete(name: string): Promise<void>;
+}
+
+/** v0.1.3 (C33): `defineApp({ onStart })` runs once after boot and claim. */
+export interface StartContext {
+  db: Db;
+  log: Logger;
+  scopes: ScopeStore;
+  secrets: AppSecrets;
+  getKey(name: string): Promise<string | null>;
+  callServiceHelper<O = Json>(serviceId: string, path: string, body: Json): Promise<O>;
 }
 
 export type Handler<I = Json, O = Json> = (input: I, ctx: OpContext) => Promise<O>;
@@ -364,6 +389,8 @@ export interface HookContext {
   db: Db;
   getKey(name: string): Promise<string | null>;
   signal: AbortSignal;
+  /** v0.1.3 (C31) */
+  secrets: AppSecrets;
 }
 export type HookHandler = (req: HookRequest, ctx: HookContext) => Promise<HookResponseByPhase[HookRequest["phase"]]>;
 
@@ -375,7 +402,19 @@ export interface DynamicHandlers {
 }
 
 // ── Public routes (manifest publicRoutes; app verifies) ──
-export type PublicHandler = (req: Request, ctx: { log: Logger; db: Db; getKey(name: string): Promise<string | null> }) => Promise<Response>;
+export type PublicHandler = (
+  req: Request,
+  ctx: {
+    log: Logger;
+    db: Db;
+    getKey(name: string): Promise<string | null>;
+    /** v0.1.3 (C31) */
+    publicUrl: string | null;
+    workspace: WorkspaceId;
+    scopes: Pick<ScopeStore, "instances">;
+    secrets: AppSecrets;
+  },
+) => Promise<Response>;
 
 // ── App definition ──
 export interface AppEvents {
@@ -395,6 +434,8 @@ export interface AppDefinition<A extends string = never> {
   events?: AppEvents;
   /** app audit actions (typed literal list; no free strings) */
   auditActions?: readonly A[];
+  /** v0.1.3 (C33) */
+  onStart?(ctx: StartContext): Promise<void>;
 }
 export interface App {
   readonly manifest: Manifest;

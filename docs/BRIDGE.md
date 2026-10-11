@@ -316,3 +316,8 @@ K9 claims (`v`, `iss`, `sub` = `aud` = `tb:ins:<id>`, `iat`, `exp` = iat + 12 h,
 
 ## Open questions
 None open for the bridge after C15/C16 and CORE §14. Settled items recorded for traceability: shared `/a/<product>/` origin (C15 accepted until third-party apps ship), `entitled: false` entries (C15), idempotency key as body field (CORE §8; SDK-API aligned), relay stdio only (I5), refresh grace 30 s (I12), CLI key connection only (C16 S9).
+
+## v0.1.3 clarifications (C35)
+- Public routes: the app receives the full path `/p/<product>/<path>` (the SDK also matches `<path>` alone).
+- `ClaimResponse` carries no workspace id; apps take it from the first verified slice. Slice grant entries are matched to companion targets by `wf`.
+- `AppStatusResponse` does not refresh `app.publicKey`; `tb-exec` uses the key from its claim answer. Services report `AppStatus` with `scopesRev = 0`, `pendingHolds = 0`.

@@ -288,3 +288,32 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 
 ## specs: DECIDED and shipped in spec v0.1.1 / manifest 0.1.0 (C21, C26, C28, C29, C30)
 - C21 bridge P1 manifest exports items 1–6; C26 `signJwsWithSigner` (bridge item 7) + `DeviceAgentTokenResult.bridge_id` (tbd gap); C28 one volume per service, `TB_BACKUP_DIR=<data mountPath>/backup` (portal-core item); C29 release record `source {repo, ref, dockerfile}` on channel dev, stable requires image digest; C30 `TYP.releaseIndex` + `ReleaseIndexClaims` (platform item).
+
+## knowledge: tb-exec distribution and helper start convention (C6) — P1 gap
+- tb-exec is a Node script (`bin` of `@opt2-tealbrick/miniapp-sdk`), not a static binary. Knowledge's companion images therefore copy the Node 24 binary + `npm install <miniapp-sdk tarball>` into a thin layer and run `node …/dist/server/tb-exec-cli.js -- <upstream cmd>`. Confirm this is the intended distribution (or publish a static binary / small image to COPY from).
+- SDK-API §11 says tb-exec "starts the helper beside the upstream command" but nothing says HOW tb-exec learns the helper command and its loopback port. Knowledge's images assume: `tb-exec --helper-cmd "<cmd>" --helper-target 127.0.0.1:<port> -- <upstream...>`; tb-exec listens on manifest `helper.port`, verifies the instance assertion, forwards only declared `helper.paths` to the target. Please fix the flag names in SDK-API (image-internal, no manifest change).
+- The current SDK source (`service-helper.ts`) answers `helper_unavailable`: Knowledge GBrain sources cannot be provisioned until it ships (fallback C6: fixed source pool).
+
+## knowledge: app start hook for background work — P1 gap
+- Knowledge drains a projection outbox and provisions engine resources in the background. `defineApp` gives the DB/helper access only inside handlers/events, so Knowledge binds lazily on the first call/event and provisions on the first engine-backed call. Ask: `defineApp({ onStart(ctx: { db, log, scopes, getKey, callServiceHelper }) })` (or the same members on `RunningApp`), so provisioning and draining start at boot. Not blocking.
+
+## specs: DECIDED (C31, C33) — in miniapp-sdk 0.1.0 and SDK-API v0.1.3 text
+- C31 connect's four SDK gaps: `OpContext.publicUrl` (slice `bridge.publicUrl`), `OpContext.workspace`, `scopes.instances` on person/public ctx, `ctx.secrets` sealed under TB_KEK.
+- C33 knowledge: `tb-exec` Node bin flags `--helper-cmd`/`--helper-target`; `defineApp({ onStart })`; real `callServiceHelper`.
+
+## specs (Lead · Specs, P1): SPEC-GAPs found while building manifest 0.1.0 + miniapp-sdk 0.1.0 — proposed clarifications (implemented as described; additive, need a Coordinator OK to land in spec text)
+1. Service private address: nothing names a companion service's internal URL. SDK reads the manifest `runtime.env` entry whose value is `{{services.<id>.url}}` (Core's deploy recipe must render it). Proposal: make `{{services.<id>.url}}` the documented template variable (MANIFEST §runtime.env) — Core + Knowledge align.
+2. `ClaimResponse` has no workspace id; the SDK takes it from the first verified slice. Proposal: keep (no wire change).
+3. Slice `grants[]` carry no target product label; the SDK picks a companion grant by matching `wf` to its declared companion ops. Proposal: add optional `product` beside each slice grant entry (additive) — until then the `wf` match is the rule.
+4. Public routes: BRIDGE §9.2 forwards `/p/<product>/<path>` unchanged; SDK serves both `/p/<product>/<path>` and `<path>`. Proposal: the app sees the full `/p/<product>/<path>` (BRIDGE wins).
+5. Bridge-op proofs: `in` (input digest) is bound for resolve/mark/scope_summary and omitted for catalog (SDK-API §3.2 reading). Proposal: keep.
+6. `sdkMajor`: SDK 0.x counts as major 1 for the manifest `sdkMajor ≥ 1` rule. Proposal: keep until SDK 1.0.
+7. Idempotency keys live in `tb_idempotency` (ops with `receipt: false` still need keys), not in the receipts table. Proposal: accept (one mechanism, one table).
+8. Companion (app) callers' scope rows are keyed by instance id with manifest defaults on first call. Proposal: accept.
+9. Standard person-op outputs: `{items, nextCursor}` (lists), `{agents}`, `{keys}`, `{ok}`. Proposal: accept as the spec shape.
+10. JCS rejects lone surrogates (I-JSON); grant failures use `grant_invalid|grant_expired|grant_revoked` (BRIDGE §8), other tokens `invalid_token`. `TB_KEK` accepted as base64url/hex 32 bytes (or ≥ 32 chars hashed); KEK id = non-secret fingerprint `kek_<16 hex>`. Proposal: accept.
+11. Manifest validator codes not named in MANIFEST.md: `operation_duplicate`, `manifest_too_large`, `schema_invalid`, `hand_written_artifact`; SPDX check uses an embedded open-source id list (`LicenseRef-*` refused); `pattern` defaults are not regex-matched by Core (ReDoS). Proposal: accept; add the codes to MANIFEST §14 at the next text revision.
+
+## specs: DECIDED (C35, C38) — in spec text v0.1.3
+- C35: SPEC-GAPs 1–11 accepted; item 10 changed: `TB_KEK` exactly 32 bytes (no hashed fallback; manifest 0.1.1).
+- C38: bridge release records carry a `runtime` record; Core sets `RAILWAY_RUN_UID=0` on services with volumes.

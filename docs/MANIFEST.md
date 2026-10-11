@@ -311,3 +311,8 @@ MCP: `connect__tools_search`, `connect__tools_call`. EXAMPLE list mode (engine o
 
 ## Open questions
 None. v0.1 review items applied: S6 (§7), S8 + N6 (§10, §13), N1 (§2, §5.4), N4 (schema `$id`), N7 (§2, M-OP-3), N9 (§12), N13 (§7). v0 questions resolved in CORE §14 (I3, I8, I10; `tb-exec` static binary owned by SDK-API; hook handlers addressed by hook id; skills-archive digest filed with Lead · Platform by the Coordinator).
+
+## v0.1.3 additions (C35, Lead · Specs SPEC-GAPs 1, 11)
+- `runtime.env[].value` may use the template `{{services.<id>.url}}`; Core's deploy recipe renders it to that service's private URL. It is how an app (and `callServiceHelper`) learns a companion service's address.
+- Validator codes added to the rule table: `operation_duplicate`, `manifest_too_large` (rule M-DOC-0, 256 KiB), `schema_invalid` (rule `schema`), `hand_written_artifact`. SPDX: an embedded open-source id list; `LicenseRef-*` refused. A setting's default is not matched against its app-supplied `pattern` by Core (ReDoS guard); the pattern must compile.
+- `tb-exec` reads the manifest from `--manifest <path>` (default `/opt/tb/tealbrick.manifest.json`); service images copy the app manifest there.
