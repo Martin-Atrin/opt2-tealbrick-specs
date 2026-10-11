@@ -101,7 +101,7 @@ Wire shapes: `types/routes.ts` is the ONE source (`DeviceStartInput`, `DeviceSta
 | Owner approval screen (`scope=owner`) | shows client, machine label, request time, user code, and the text "This signs in a tool AS YOU — never approve for an agent."; one Approve |
 | Agent approval screen (`scope=agent`) | shows client, harness, machine label, user code, and for each pair the agent card (pre-selected or chosen among the workspace's cards) and workspace; one Approve creates all connections |
 | Result `scope=owner` | `DeviceOwnerTokenResult` carries the K3 value once; Core keeps its digest + `client: cli \| tbd` |
-| Result `scope=agent` | Core creates one `{con, agt, method: "key", publicKey, gen: 1}` per pair; `DeviceAgentTokenResult` carries identifiers and bridge endpoints and NO bearer. The agent waits until the connection is in the bridge config (bridge answers `invalid_grant` / `connection_unknown` until then; retry with backoff ≤ 60 s) and exchanges a K4 agent assertion (§10). |
+| Result `scope=agent` | Core creates one `{con, agt, method: "key", publicKey, gen: 1}` per pair; `DeviceAgentTokenResult` carries identifiers (incl. `bridge_id` for the assertion `aud`, v0.1.1 C26) and bridge endpoints and NO bearer. The agent waits until the connection is in the bridge config (bridge answers `invalid_grant` / `connection_unknown` until then; retry with backoff ≤ 60 s) and exchanges a K4 agent assertion (§10). |
 | Conformance | `cred.dev.no_unbound_list`, `cred.dev.approve_requires_user_code` (missing / wrong code refused; 6th try refused even with the right code), `cred.dev.no_clear_user_code` (no output after start carries it; DB holds the digest), `cred.dev.one_time`, `cred.dev.expiry`, `cred.p1.kit_cannot_get_owner` |
 
 ## 7. Agent pairing code (K2b, C4) — Claude Desktop / Codex OAuth connectors only
@@ -278,3 +278,7 @@ None of these is ever sent to a bridge, app, agent or browser.
 
 ## Open questions
 None. (Key connections without a refresh token: accepted, C15.)
+
+## v0.1.1 additions
+- `TYP.releaseIndex = tb-release-index+jws` (C30) signs the Platform release index digest (`ReleaseIndexClaims`, issuer `tb:releases`, pinned JWKS in Core, ≤ 180 d). It is a signed document, not one of the 13 credential kinds.
+- `signJwsWithSigner` (manifest package, C26) lets holders keep K4 in the OS keychain / Secure Enclave; same JWS format.

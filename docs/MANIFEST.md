@@ -4,6 +4,9 @@ Status: v0.1, Lead · Specs, 2026-10-11. Machine-readable: `manifest.schema.json
 
 Scope: the manifest is the ONLY description of a miniapp: identity, discovery, runtime, operations, scopes, settings and key requirements, hooks, companions, unlocks, skills, harness hints, backups, artifacts, public routes and UI entry points. Portal Core, the bridge, the SDK, the GUI, the CLI and conformance read it through one validator package; nothing else describes an app. This file states every field's meaning and every cross-field rule (`M-*`) the validator enforces. The schema checks structure; the rules check what JSON Schema cannot. If this text and the schema disagree, the schema wins (CORE §0).
 
+## Note v0.1.1 (C28)
+On Railway one volume per service: the deploy recipe mounts the `data` volume and the backup directory is `<data mountPath>/backup`; the declared backup volume is merged into it.
+
 ## 1. Document
 
 | Item | Rule |

@@ -131,6 +131,9 @@ export interface JwsExpect {
   maxLifetimeS: number;
 }
 export declare function signJws<C extends object>(typ: Typ, claims: C, key: Ed25519KeyPair): Promise<string>;
+/** v0.1.1 (C26): JWS assembly with an external signer (private key outside the process: OS keychain / Secure Enclave). */
+export interface ExternalSigner { kid: string; sign(signingInput: string): string | Promise<string> }
+export declare function signJwsWithSigner<C extends object>(typ: Typ, claims: C, signer: ExternalSigner): Promise<string>;
 export declare function verifyJws<C extends object>(token: string, keys: KeySet, expect: JwsExpect): { ok: true; header: { typ: Typ; kid: string }; claims: C } | Refusal;
 
 /** Instance assertion (`TB-Assert`, typ tb-instance-assert+jwt) bound to method, path and body digest. */

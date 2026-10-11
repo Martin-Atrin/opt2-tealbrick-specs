@@ -23,6 +23,8 @@ export type AgentRef = `tb:agt:${AgentId}`;
 export type InstanceRef = `tb:ins:${InstanceId}`;
 export type BridgeRef = `tb:brg:${BridgeId}`;
 export type TbRef = PortalRef | PersonRef | AgentRef | InstanceRef | BridgeRef;
+/** v0.1.1 (C30): issuer of the signed release index (Platform release key, pinned JWKS in Core). Not a caller type. */
+export type ReleasesRef = "tb:releases";
 
 // ── Caller types (exactly five) and kinds ────────────────────────────────────
 export const CALLER_TYPES = ["person", "agent", "app", "bridge", "portal"] as const;
@@ -47,6 +49,8 @@ export const TYP = {
   callProof: "tb-call+jwt",
   /** Standalone only (CREDENTIALS §17); accepted only on the bridge /admin surface. */
   ownerAssertion: "tb-owner-assert+jwt",
+  /** v0.1.1 (C30): signed release index (Platform). A signed DOCUMENT digest, not a credential kind. */
+  releaseIndex: "tb-release-index+jws",
 } as const;
 export type Typ = (typeof TYP)[keyof typeof TYP];
 
@@ -75,6 +79,8 @@ export const LIFETIME_S = {
   oauthAuthorizationCode: 60,
   enrolmentCodeMax: 86400,
   configOrSlice: 43200,
+  /** v0.1.1 (C30) */
+  releaseIndex: 15552000,
   grant: 43200,
   grantRemintBelow: 21600,
   ticketLaunch: 60,
@@ -527,3 +533,15 @@ export const CREDENTIAL_REGISTRY = [
     revocation: "planned rotation (90 d) or compromise procedure", revocationLatency: "compromise: ≤ 60 s online", pause: "n/a",
   },
 ] as const satisfies readonly CredentialRegistryRow[];
+
+/** v0.1.1 (C30): claims of the signed release index JWS. Closed set. The JWS signs `indexDigest` = digest(index body), so it stays < MAX_JWS_BYTES. */
+export interface ReleaseIndexClaims {
+  iss: ReleasesRef;
+  aud: PortalRef;
+  iat: number;
+  exp: number;
+  schema: "opt2.release-index/v2";
+  indexDigest: Sha256Digest;
+  releases: number;
+  offers: number;
+}

@@ -352,6 +352,8 @@ export interface DeviceOwnerTokenResult { scope: "owner"; access_token: string; 
 export interface DeviceAgentTokenResult {
   scope: "agent";
   workspace_id: WorkspaceId;
+  /** v0.1.1 (C26): needed for the agent assertion `aud = tb:brg:<id>`. */
+  bridge_id: BridgeId;
   mcp_url: string;
   token_endpoint: string;
   connections: { connection_id: ConnectionId; agent_id: AgentId; public_key_thumbprint: string }[];
