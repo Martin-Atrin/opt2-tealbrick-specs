@@ -392,3 +392,17 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 - GUI status: built and hidden until the row exists. `src/core/billing.ts` uses op id `billing.portal`, shows "Billing" in the account menu only when `ROUTES` contains it, and opens only `https://billing.stripe.com/...`. It needs a spec release with the row; then the GUI bumps `@opt2-tealbrick/spec`.
 
 ## specs: DECIDED (C60) — spec 0.1.9: route `billing.portal` as proposed (BillingPortalInput/BillingPortalSession).
+
+## bridge → specs/conformance + Core: C59 key page on its own origin — env TB_KEYS_PUBLIC_URL
+- Bridge (0.1.10): `/keys` is served ONLY when the request Host is the host name of `TB_KEYS_PUBLIC_URL` (an https origin whose host name differs from `TB_PUBLIC_URL`). That origin serves nothing but `/keys` (+ `/healthz`, `/readyz`); the main origin returns 404 for `/keys`, and 503 "key page not configured" when `TB_KEYS_PUBLIC_URL` is unset. Cookie unchanged (HttpOnly, Secure, SameSite=Strict, Path=/keys), now on the keys origin.
+- Core: at bridge deploy add a SECOND public domain to the bridge service and set `TB_KEYS_PUBLIC_URL=https://<that domain>`; `tickets.keys` / the GUI form-POSTs keys tickets to `<TB_KEYS_PUBLIC_URL>/keys`. Ticket `aud` stays `tb:brg:<id>` (no credential change). Same env on the bridge-runtime recipe (`source: public-url`, second domain).
+- Conformance: the bridge target should set `TB_KEYS_PUBLIC_URL` (e.g. `https://localhost:<public port>`) and send key-page requests with that Host; also assert `/keys` → 404 on the main origin and the keys origin → 404 for `/a/*`, `/mcp`, `/oauth/*`. Until then the bridge CI carries narrow, text-matched waivers for the 15 key-page check ids (scripts/conformance-waivers.json).
+
+## qa: S1 — C31 slice `bridge.publicUrl` is missing from the spec schema → Connect OAuth cannot start (live, 2026-10-12)
+- Live: Connect (0.1.4) Gmail → "Sign in and connect" → "The workspace door address is not known yet." (Connect app.ts:576 `public_origin_unknown`). The SDK takes `OpContext.publicUrl` from slice `bridge.publicUrl` (miniapp-sdk app.ts:257). Core emits it only if the installed spec schema has it (`SLICE_PUBLIC_URL` gate, portal-core configdoc.ts:20, 131). `opt2-tealbrick-specs` main `packages/spec/schemas/instance-slice.schema.json` → `bridge.properties` = [id, keys] (closed). So Core never emits it.
+- Ask: add `bridge.publicUrl` (https URI) to the instance-slice schema + `types` (C31 was approved additive), release spec, then Core and the SDK pick it up. Blocks J1-31..34 (Gmail connect) and every OAuth/webhook public route of any app.
+
+## bridge → specs/SDK (C62 BSD-04): export the ONE privilege drop for the bridge
+- `dropPrivileges` (miniapp-sdk src/server/privilege.ts) is not exported, and the bridge depends on `@opt2-tealbrick/manifest` only (REPOS §3). Please export it so bridge-server reuses it instead of a second copy. Preferred: move `dropPrivileges`/`RUN_UID`/`RUN_GID`/`PrivilegeProc` into `@opt2-tealbrick/manifest` (it only needs node:fs + process ids) and re-export from miniapp-sdk; alternative: a miniapp-sdk subpath `@opt2-tealbrick/miniapp-sdk/privilege` with no other imports. The bridge calls it with `{ dataDir: TB_DATA_DIR, backupDir: TB_DATA_DIR }` before loading state or listening, and refuses to keep running as root otherwise.
+
+## specs: DONE (C64 S1) — spec 0.1.10: instance-slice `bridge.publicUrl` (schema + types). Core: emit it in slices; SDK reads it into OpContext.publicUrl.

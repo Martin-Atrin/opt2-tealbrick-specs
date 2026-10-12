@@ -91,6 +91,10 @@
           "items": {
             "$ref": "workspace-config.schema.json#/$defs/ed25519Jwk"
           }
+        },
+        "publicUrl": {
+          "$ref": "workspace-config.schema.json#/$defs/httpsUrl",
+          "description": "v0.1.10 (C64): the bridge's public origin; apps build third-party callback URLs `<publicUrl>/p/<product><path>` from it (SDK OpContext.publicUrl). Core MUST emit it once the bridge's public URL is known."
         }
       }
     },

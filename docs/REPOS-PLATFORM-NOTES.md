@@ -19,13 +19,14 @@ Local working trees: `/Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-<nam
 | opt2-tealbrick-tbd | https://github.com/Martin-Atrin/opt2-tealbrick-tbd | TBD Desktop | lead's own folder WITHOUT git; untouched. Lead: `git init -b main && git remote add origin https://github.com/Martin-Atrin/opt2-tealbrick-tbd.git && git pull origin main --allow-unrelated-histories` after the secret check. |
 | opt2-tealbrick-platform | https://github.com/Martin-Atrin/opt2-tealbrick-platform | Platform | cloned |
 | opt2-tealbrick-packages | https://github.com/Martin-Atrin/opt2-tealbrick-packages | Portal GUI (ui) · Bridge & Harness (buzz, avm) | cloned; CI ci-v2 adopted |
+| opt2-tealbrick-samples | https://github.com/Martin-Atrin/opt2-tealbrick-samples | Specs & SDK (spine test) | cloned; ci-v7 (kind miniapp, paths sample-gate, sample-caller); Woodpecker id 29 |
 | opt2-tealbrick-qa | https://github.com/Martin-Atrin/opt2-tealbrick-qa | Adversarial QA | cloned |
 
 Remote `main` of every repo holds one initial commit (README, .gitignore, secret scan). Keep those files; extend the README.
 
 ## CI standard (template ci-v2) — every lead: adopt it
 - Standard + runner: `opt2-tealbrick-platform/ci/` (read `ci/README.md`). One pipeline: secret-scan, setup (template drift, `tealbrick-ci.json`, package rules, `@opt2-tealbrick/*` URL-dependency check), install, typecheck, lint, unit, conformance, build, kaniko image-check; on `v*` tags image-publish to `ghcr.io/martin-atrin/<image>` + signed release record → release registry; on `<package>-v<ver>` tags a tarball per package on the GitHub release.
-- Current template: `ci-v5` (2026-10-12): adds companion `kind: "service"` images (BSA-01), the `gen` stage (miniapps need `"gen": "tb-gen all"`, gen/ git-ignored) and kit tarball on v* tags (BSA-03), manifest 0.1.3 for release records (BSA-16), plus ci-v4's VOLUME check. Move with `node ci/tb-ci.ts adopt ../opt2-tealbrick-<name> --kind <kind>` (keeps tealbrick-ci.json, pins $schema to ci-v5); Knowledge also adds one `kind: "service"` image per manifest service with `build` (see ci/README.md).
+- Current template: `ci-v7` (2026-10-12; `ci/MIN_TEMPLATE` = ci-v7, setup fails below it; daily template-audit names laggards). Re-adopt: `cd opt2-tealbrick-platform && git pull && node ci/tb-ci.ts adopt ../opt2-tealbrick-<name> --kind <kind>` (keeps tealbrick-ci.json formatting). pnpm repos ALSO run `node ci/tb-ci.ts pin-tarballs ../opt2-tealbrick-<name>` and commit `tealbrick-integrity.json` (S3: pnpm does not record integrity for GitHub-release tarballs); npm lockfiles need nothing. Release signing is no longer in product pipelines (SEC-03): `v*` tags attach `release-candidate.json`, the platform signer verifies + signs.
 - Adopted on main (2026-10-11 ~19:45): specs, sdk, qa, packages, platform, bridge, connect. NOT yet: knowledge, portal-core, portal-gui, website, tbd.
 - Woodpecker is LIVE for all 12 repos (2026-10-11 ~20:20): every push to main and every PR runs the pipeline. Fork PRs need approval.
 - Lead to adopt (repo already has lead commits; Platform did not touch it): knowledge, connect, bridge, portal-core, portal-gui, website, tbd. Command:

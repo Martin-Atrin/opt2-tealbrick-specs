@@ -185,8 +185,8 @@ export interface InstanceSlice extends SliceClaims {
   ins: InstanceId;
   product: ProductId;
   portalKeys: PortalKeyEntry[];
-  /** keys the app accepts for call proofs */
-  bridge: { id: BridgeId; keys: Ed25519PublicJwk[] };
+  /** keys the app accepts for call proofs; v0.1.10 (C64) `publicUrl` = bridge public origin (OpContext.publicUrl) */
+  bridge: { id: BridgeId; keys: Ed25519PublicJwk[]; publicUrl?: string };
   pause: PauseState;
   revoked: RevokedSet;
   personNbf: EpochS;

@@ -63,6 +63,7 @@ IDs are stable; the report lists every ID with pass/fail and the asserted value.
 - B10 relay form speaks stdio only (no listener), holds no grants, keys or config (filesystem + memory snapshot check) and duplicates no checks; enforcement observed only at the deployed bridge.
 - B11 key page: `pur: keys` ticket required; values written to the sealed store; never in logs (log capture scan) or status; app gets only manifest-declared keys with an instance assertion; undeclared key → refused.
 - B11a (v0.1.6, C52): the keys-ticket POST response itself is the key form (200, Strict session cookie on that response, no 3xx); check id `B11.ticket_post_is_form`.
+- B11b (v0.1.10, C59): every B11 key-page request (ticket POST, page GET, submit) is sent to the keys origin (`TB_KEYS_PUBLIC_URL`, `Host` = its host name). New checks: `B11.main_origin_keys_404` (main origin `/keys` → 404); `B11.keys_origin_only` (keys origin `/a/*`, `/mcp`, `/oauth/*` → 404); `B11.keys_origin_csp` (key-page responses carry `Content-Security-Policy` with `form-action 'self'`); `B11.keys_origin_unset_503` (bridge started without `TB_KEYS_PUBLIC_URL` → `/keys` 503).
 - B12 OAuth AS: metadata documents valid; DCR + PKCE S256 enforced; pairing code redeemed offline; refresh rotation with reuse detection (previous token once within 30 s, CORE I12; other reuse → connection revoked); no custom pairing grant type at `/oauth/token` (S9).
 - B13 bridge-op proofs (B5): `/tb/v1/bridge/{catalog,resolve,mark,scope-summary}` accept only the bridge-op call-proof variant; an op proof or hook proof there → refused; a bridge-op proof at `/tb/v1/ops/*` → refused.
 - B14 standalone handover (B7): after the final config, apps accept bridge-issued grants and slices; Portal-key-signed tokens issued after the handover are refused; the admin surface has exactly 4 ops (pause/resume, revoke connection, ticket) — any other admin path → 404; adding agents/edges → not possible.
@@ -118,3 +119,6 @@ JSON (machine) + markdown (human): target, spec digest, SDK versions, every chec
 
 ## Open questions
 1. A9 "app has no public address" can only be asserted from the Railway template / deployment record, not from inside the app. Recommendation: Core's deploy adapter asserts it at deploy time and conformance checks the generated template; QA checks the live project.
+
+## v0.1.10 additions (C59)
+- Bridge target: the suite sets `TB_KEYS_PUBLIC_URL` in the bridge env (a second host name that reaches the same public listener) and sends every key-page request with that origin/`Host`; B1's documented public list is per origin (main: everything except `/keys`; keys: `/keys`, `/healthz`, `/readyz`). New check ids `B11.main_origin_keys_404`, `B11.keys_origin_only`, `B11.keys_origin_csp`, `B11.keys_origin_unset_503` (§4.4 B11b). Package `@opt2-tealbrick/conformance` 0.1.6.

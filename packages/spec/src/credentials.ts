@@ -200,7 +200,8 @@ export interface ConfigCredentialSection {
 /** Credential section of the slice body. */
 export interface SliceCredentialSection {
   portalKeys: PortalKeyEntry[];
-  bridge: { id: BridgeId; keys: Ed25519PublicJwk[] };
+  /** v0.1.10 (C64): `publicUrl` = bridge public origin (apps build `/p/<product>` callback URLs from it) */
+  bridge: { id: BridgeId; keys: Ed25519PublicJwk[]; publicUrl?: string };
   pause: PauseState;
   revoked: RevokedSet;
   /** epoch seconds; app UI sessions created earlier are invalid */

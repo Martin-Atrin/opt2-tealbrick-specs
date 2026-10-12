@@ -266,7 +266,7 @@ Auth: B = browser, O = owner native session, pub = public, dev = device, brg = b
 
 ### 5.6 Keys and person tickets (no key value through Portal)
 - `keys.status`: per requirement name `{set: true|false|null}` from the latest bridge ack; `bridgeReady: false` until the bridge enrols (it deploys at onboarding step 1). The GUI labels source `account_default` as "workspace default keys" (N13: they live in each workspace's bridge, so a second workspace asks again).
-- `tickets.keys {names?, returnTo?}` → `{url, ticket, expiresAt}`: K11 `pur: keys`, `aud` = this bridge; `url` = the bridge key page (path owned by BRIDGE.md). `409 bridge_not_ready` before enrolment.
+- `tickets.keys {names?, returnTo?}` → `{url, ticket, expiresAt}`: K11 `pur: keys`, `aud` = this bridge; `url` = the bridge key page on the keys origin, `<TB_KEYS_PUBLIC_URL>/keys` (v0.1.10, C59; path owned by BRIDGE.md). `409 bridge_not_ready` before enrolment.
 - `tickets.launch {product, path?}` → K11 `pur: launch`, `aud` = the instance, url `https://<bridge>/a/<product>/tb/launch` (form POST, CORE §13). Requires `isEntitled` (`402`), instance running, bridge online.
 - No row accepts a key value. The only secret inputs any row takes are provider credentials Core itself needs (`providers.link_token`, OAuth `code`) — sealed at once, `bodyLog: none`.
 
@@ -393,3 +393,6 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 
 ## v0.1.9 addition (C60)
 - Route `billing.portal` (`POST /billing/portal`, browser only, `bodyLog: none`, not idempotent, registry Entitlement): input `{returnPath}`, output `{url, expiresAt}` — a one-time Stripe customer-portal link (invoices, receipts), never stored or logged. Errors: `409 conflict` (`details.reason: no_billing_customer`) when the account never bought; `502 checkout_failed` when Stripe refuses.
+
+## v0.1.10 addition (C59)
+- `tickets.keys` answers `url = <TB_KEYS_PUBLIC_URL>/keys` — the bridge's second public domain, key page only (BRIDGE §3.1, §9.3); the GUI form-POSTs the ticket there. Ticket claims unchanged (`aud` = `tb:brg:<id>`). `bridge.deploy` adds that second domain to the bridge service and sets `TB_KEYS_PUBLIC_URL=https://<domain>`; the bridge release `runtime` record lists the env with `source: public-url`.
