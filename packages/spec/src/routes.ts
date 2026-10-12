@@ -617,11 +617,18 @@ export interface Edge {
   blockedReason?: "companion_op_missing" | "target_not_deployed";
   /** ≤ 200 chars, plain text */
   blockedDetail?: string;
+  /** v0.1.19 (C111, agent→app only): null/absent = verb-level access; an array = the op allow-list (the grant's `wf`, any card mode) */
+  ops?: string[] | null;
+  /** v0.1.19 (C111, agent→app with a deployed target): what toggling each verb would change (grant rule `op.crud ⊆ verbs`;
+   *  op-limited edges stay exact) — the GUI review sheet shows it (one rule, L1) */
+  verbChanges?: Partial<Record<Crud, { unlocks: string[]; removes: string[] }>>;
 }
 export interface Canvas { ws: WorkspaceId; revision: number; nodes: CanvasNode[]; edges: Edge[] }
 export interface CanvasSaveInput { ws: WorkspaceId; revision: number; nodes: CanvasNode[] }
 export interface EdgeCreateInput { ws: WorkspaceId; agt: AgentId; product: ProductId; crud: Crud[]; scopeType?: string }
-export interface EdgeUpdateInput { ws: WorkspaceId; edg: EdgeId; crud?: Crud[]; scopeType?: string | null; enabled?: boolean }
+/** v0.1.19 (C111): `ops` = op allow-list (agent-audience, non-money ops of the deployed release; `crud` defaults to the union
+ *  the ops need); null = back to verb-level access. */
+export interface EdgeUpdateInput { ws: WorkspaceId; edg: EdgeId; crud?: Crud[]; scopeType?: string | null; enabled?: boolean; ops?: string[] | null }
 export interface EdgeRef { ws: WorkspaceId; edg: EdgeId }
 export interface HookSubscription {
   ins: InstanceId;

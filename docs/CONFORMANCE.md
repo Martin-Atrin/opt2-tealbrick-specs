@@ -165,3 +165,22 @@ A bridge or SDK build pins its channel's Portal Root Keys; a conformance run can
 - (C107) `M2.outward_family`: every op with effect `outward` declares a holdFamily. **Warn-only in 0.1.11** (status pass, asserted text starts `WARN:` and a report note lists the ops) because Connect v0.4.0 has 11 agent ops + 1 person op without one; **fail from 0.1.12**. `B16.resolve_family` / app `A11.resolve_family`: a `resolve` answer with effect `outward` or `money` and no `holdFamily` FAILS (no released app is affected: dynamic resolutions are runtime answers; Connect fixes them in its next release).
 - (C108) `C3.grant_held_unknown`: a grant with `held: ["destructive", "future_x"]` is ACCEPTED (not `grant_invalid`) and a `destructive` op is still held; bridge side `B5.grant_held_unknown`: the bridge forwards calls under such a grant.
 - (C107, BRIDGE v0.1.17) `B16.resolve_family` asserts the refusal shape: `dynamic_resolve_failed` with `details.reason: "family_missing"` (conformance 0.1.11).
+
+## v0.1.18 — package 0.1.12 (Knowledge sweep; Connect F21)
+- **Setup fixtures** in `tealbrick-conformance.json` (beside the manifest; `--inputs` stays and is merged, the file wins per key):
+  ```json
+  {
+    "setup": [
+      { "id": "owner_area", "as": "owner", "op": "tb.scopes_set", "input": { "...": "..." } },
+      { "id": "app_area", "as": "app", "op": "area_create", "input": { "name": "conformance" }, "capture": { "appArea": "/id" } }
+    ],
+    "inputs":   { "<opId>": { "area": "${appArea}" } },
+    "inputsAs": { "app": { "<opId>": { "area": "${appArea}" } }, "agentB": { } },
+    "dynamic":  { "<dynamicOpId>": { "resolveTools": ["<tool name>"] } }
+  }
+  ```
+  `setup` runs once after the first status push, before the checks, in order; `as` ∈ `owner` (person session) | `agentA` | `agentB` | `app` (the suite's companion app caller, the same identity A12.* uses); `capture` maps a name to a JSON pointer into the step's `output`; `${name}` placeholders (whole string values only) in later `input`, `inputs` and `inputsAs` are replaced by captured values. A failing setup step → every check that needs its captures reports `not_run` with the step id and answer (never a silent pass). `inputsAs.<caller>` overrides `inputs` for that caller. `dynamic.<op>.resolveTools` = tool names the dynamic checks (A11.*, A11.resolve_family) resolve instead of taking them from the catalog; the app's conformance start module makes them resolvable (e.g. a stub engine behind a harness-only env such as `TBCONF_STUB_ENGINE=1`); a resolve that answers null for a listed tool FAILS (the app promised it).
+- **Fakes (L1, Connect F21):** the fake bridge's slice carries `agents[].scopeRequest` for agent A (`{product: <self>, kind: "connect_inbox", createName: "conformance"}`); new app check `A12.scope_request` is n/a by default (black-box apps need not expose it) — the SDK's `ctx.agentScopeRequest(agt)` is covered by SDK unit tests.
+- `M2.outward_family` FAILS from 0.1.12 (SDK sweep: no released app warns; Connect v0.5.0 declares all families). The manifest VALIDATOR keeps its grace for an absent outward family (older releases such as Connect v0.4.0 stay deployable by Core); it refuses it from the first manifest release after every deployed workspace runs a release with families (Coordinator decides).
+- Stub resolvers (Knowledge, Coordinator rule): a stub behind `resolveTools` MUST live only in the app's conformance harness (`conformance.start.ts` + a harness-only env such as `TBCONF_STUB_ENGINE`); no product code path may read that env, so the stub is unreachable in the shipped image. The app's own tests assert it (e.g. a source scan: no file under `src/` reads `TBCONF_*`).
+- (C111a) `B5.free_wf_limits` (Free grant with non-empty wf → an op outside wf refused `not_in_workflow`), `B5.free_wf_caps` and `A3.free_wf_caps` (Free grant with wf + caps → caps still hold).

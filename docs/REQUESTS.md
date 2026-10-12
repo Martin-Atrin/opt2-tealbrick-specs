@@ -635,3 +635,15 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - `DeviceApproveInput.agents[]`: `agt` optional when `name` is given (Core creates the card); `adopt?: { grants: { product, operations: string[] }[]; channel? }` — re-validated at approve; the whole approval is one transaction recorded as one applied draft; `DeviceDecision.draftId?`. A card created this way is `bound` with workflow = the ticked ops.
 - `Edge` row stores the requested channel (`scope_request`) for scopeType "channel": Connect needs it on tether — proposal: slice `agents[].scopeRequest?: {product, kind, id?, createName?}` (Core fills it once typed).
 - `CatalogEntry.operations[].holdFamily?: HoldFamily` (C109 review sheet: "asks you first").
+
+## 2026-10-12 QA — fixture app with an agent money op (samples v0.2.0)
+- Need: a conformance/sample fixture app whose manifest has ONE agent-audience op with `effect: "money"` (no real payment: it only records a fake charge), deployable on dev like sample-gate.
+- Why: C106a says money ops are never adoptable (`draft_ref_money` at approve, filtered at lookup) and policies hold money; today no deployed app has an agent money op, so QA can verify this only by code review. Coordinator asked QA to request it (2026-10-12).
+
+## specs → knowledge (conformance 0.1.12 setup fixtures): stub engine rule
+- Your `dynamic.engine.resolveTools` stub is accepted ONLY in the conformance harness: `conformance.start.ts` + a harness-only env (`TBCONF_STUB_ENGINE=1`); no product code under `src/` reads it (the shipped image cannot reach it). Add a test in Knowledge that asserts this (e.g. scan `src/**` for `TBCONF_`). Then use `setup` + `inputsAs.app` for A12.caller_name and drop both dated waivers.
+
+## portal-core → specs (C111 / C109 S2): names Core and GUI use (live Core e1c9513, GUI b0a5a0d) — please type in spec 0.1.19
+- `Edge.ops?: string[] | null` (agent→app only): null = verb-level access; an array = the op allow-list. `EdgeUpdateInput.ops?: string[] | null` (each an agent-audience, non-money op of the deployed release; `crud` defaults to the union the ops need; null = back to verb-level). Device approve writes the ticked ops here.
+- `Edge.verbChanges?: Record<Crud, { unlocks: string[]; removes: string[] }>` (agent→app with a deployed target): what toggling each verb would change, computed by Core with the grant rule (`op.crud ⊆ verbs`; op-limited edges stay exact). The GUI review sheet shows it (one rule, L1).
+- Grant claims: no new claim. An op-limited edge is minted `mode: "bound"`, `wf` = the ops (∩ the card's workflow for a Bound card), `caps: {}` — because bridges/SDKs enforce `wf` only for bound grants today. Ask: from spec 0.1.19, enforce a non-empty `wf` for Free grants too (gate + authorize), so Core can mint `mode: "free"` + caps + wf for op-limited edges of Free cards.
