@@ -345,7 +345,7 @@ export const TOOL_NAME_RULE = {
   skillsOp: "tb_skills",
   searchSuffix: "_search",
   callSuffix: "_call",
-  idempotencyMetaKey: "tealbrick/idempotencyKey",
+  idempotencyMetaKey: "tealbrick/idempotencyKey", // gitleaks:allow (MCP _meta key name, not a secret)
   skillUriPrefix: "tealbrick://skills/",
 } as const;
 /** `<product>__<op>`, `<product>__<op>_search|_call`, `<product>__<dynamic list entry>`, `<product>__tb_hold_status`. */
