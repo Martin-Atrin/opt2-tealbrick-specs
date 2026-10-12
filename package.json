@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@9.15.4",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
-    "typecheck": "pnpm -r run typecheck",
+    "typecheck": "node \"$npm_execpath\" -r run typecheck",
     "lint": "biome check .",
-    "test": "pnpm -r run test",
-    "build": "pnpm -r run build"
+    "test": "node \"$npm_execpath\" -r run test",
+    "build": "node \"$npm_execpath\" -r run build"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15"
