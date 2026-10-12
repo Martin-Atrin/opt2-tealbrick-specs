@@ -376,3 +376,19 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 - CREDENTIALS.md:175 says the apply request "carries the `draftDigest` the owner saw (mismatch → refuse)"; `DraftApplyInput` (spec 0.1.7) carries `revision` + `confirm: true` and no digest. Live behaviour follows routes.ts (revision). Ask: align the CREDENTIALS text to `revision` (or add the digest to the route); conformance should test a stale revision → 409.
 
 ## specs: DONE (qa draftDigest vs revision) — spec 0.1.8: CREDENTIALS §12 aligned to routes.ts (`revision` + `confirm: true`, stale → 409 revision_conflict).
+
+## connect → bridge: app UI 404 while an app restarts (root cause of QA S1 "Connect UI 404", 2026-10-12)
+- Evidence: QA's 404 body has `requestId req_01M4Q3CJ8Y…` (ULID form = bridge; the SDK uses base64url ids), time 03:44:32Z. The bridge applied config rev 67/68 at 03:39:37–41 while tb-connect's new deployment was starting (container up 03:40:13). `buildTable` (packages/bridge/src/table.ts:128-137) failed the manifest fetch → `manifest: undefined, down: true`; `allowedUiPath` (person.ts:73-79) then answers 404 `not_found` for every UI path (while `/tb/v1/*` still forwards), until the next config rev re-fetched it (rev 69, 03:45:50). Today the same paths forward (app answers 401 without a session); Connect's built image serves ui paths (new regression test).
+- Ask (bridge): (1) retry the manifest of a `down` app on a short timer / on the next request, not only on a new config rev; (2) answer a known product whose manifest is unavailable with 503 `app_unavailable` + Retry-After, not 404.
+
+## portal-core: C58 route row `billing.portal` (Stripe customer portal: invoices, receipts)
+- Row proposal: `{ opId: "billing.portal", method: "POST", path: "/billing/portal", auth: ["browser"], exposure: "gateway", transport: "json_slow", query: [], input: "BillingPortalInput", output: "BillingPortalSession", rate: "sensitive", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" }`.
+- Types: `BillingPortalInput { returnPath: string }` (path on the Portal origin, same rule as `CheckoutInput.returnPath`); `BillingPortalSession { url: string; expiresAt: IsoTime }` — the URL is a bearer-like one-time session link: bodyLog none, not idempotent (never stored), browser only (never K3). Add `BillingPortalSession` to `SecretBearingSchema`.
+- Errors: `409 conflict` (details.reason `no_billing_customer`) when the account never bought; `502 checkout_failed` when Stripe refuses.
+- Core has the Stripe call ready (`Commerce.createPortalSession`); the handler ships with the spec row.
+
+## portal-gui: billing portal op (C58 "Stripe billing portal link", Core + GUI)
+- Need ONE route row so the GUI's account menu can open Stripe's hosted billing portal (invoices, receipts, payment method). Proposal: `billing.portal` POST `/billing/portal`, auth `browser` only, exposure gateway, transport `json_slow`, input `BillingPortalInput {returnPath: string}` (same-site relative path; Core prefixes the Portal origin), output `BillingPortal {url: string; expiresAt: IsoTime}`, rate `sensitive`, bodyLog `meta`, audit null (or `billing.portal_open`), not draftable, not confirm, not idempotent, registry `entitlement`. Core creates a Stripe Billing Portal session for the account's Stripe customer (`billing_customers`), `return_url` = Portal origin + returnPath. 409 `conflict` when the account has no Stripe customer yet (GUI says "No purchases yet").
+- GUI status: built and hidden until the row exists. `src/core/billing.ts` uses op id `billing.portal`, shows "Billing" in the account menu only when `ROUTES` contains it, and opens only `https://billing.stripe.com/...`. It needs a spec release with the row; then the GUI bumps `@opt2-tealbrick/spec`.
+
+## specs: DECIDED (C60) — spec 0.1.9: route `billing.portal` as proposed (BillingPortalInput/BillingPortalSession).

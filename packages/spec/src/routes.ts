@@ -594,6 +594,10 @@ export interface LicenceRef { lic: LicenceId }
 export interface LicenceTargetInput { lic: LicenceId; ws: WorkspaceId }
 export interface LicenceChange { licence: Licence; configRevisions: { ws: WorkspaceId; revision: number }[] }
 export interface CheckoutInput { offerId: OfferId; ws?: WorkspaceId; returnPath: string }
+/** v0.1.9 (C60): Stripe customer portal (invoices, receipts). `returnPath` = path on the Portal origin (same rule as CheckoutInput). */
+export interface BillingPortalInput { returnPath: string }
+/** One-time Stripe portal link: bearer-like, never logged or stored (bodyLog none, not idempotent), browser only. */
+export interface BillingPortalSession { url: string; expiresAt: IsoTime }
 export interface Checkout { orderId: OrderId; url: string; expiresAt: IsoTime }
 export interface OrderRef { ord: OrderId }
 export interface Order {
@@ -765,7 +769,7 @@ export interface SchemaMap {
   BridgeStatus: BridgeStatus; KeyStatus: KeyStatus; KeyTicketInput: KeyTicketInput; LaunchTicketInput: LaunchTicketInput;
   TicketResult: TicketResult;
   Licence: Licence; LicenceListInput: LicenceListInput; LicenceList: LicenceList; LicenceRef: LicenceRef;
-  LicenceTargetInput: LicenceTargetInput; LicenceChange: LicenceChange; CheckoutInput: CheckoutInput; Checkout: Checkout;
+  LicenceTargetInput: LicenceTargetInput; LicenceChange: LicenceChange; CheckoutInput: CheckoutInput; Checkout: Checkout; BillingPortalInput: BillingPortalInput; BillingPortalSession: BillingPortalSession;
   OrderRef: OrderRef; Order: Order; UnpaidCount: UnpaidCount; StripeEvent: StripeEvent; WebhookAck: WebhookAck; ClerkEvent: ClerkEvent;
   SkillsInput: SkillsInput; SkillBundle: SkillBundle; SkillOverrideInput: SkillOverrideInput; SkillKeyRef: SkillKeyRef;
   SkillFile: SkillFile; ZipFile: ZipFile; DesktopDownload: DesktopDownload;
@@ -907,6 +911,8 @@ export const ROUTES = [
   { opId: "licences.move", method: "POST", path: "/licences/{lic}/move", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "LicenceTargetInput", output: "LicenceChange", rate: "write", bodyLog: "meta", audit: "licence.move", draftable: true, confirm: true, idempotent: false, registry: "entitlement" },
   { opId: "licences.unpaid", method: "GET", path: "/workspaces/{ws}/unpaid", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "UnpaidCount", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
   { opId: "checkout.create", method: "POST", path: "/checkout", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "CheckoutInput", output: "Checkout", rate: "sensitive", bodyLog: "meta", audit: "order.create", draftable: true, confirm: true, idempotent: true, registry: "entitlement" },
+  /** v0.1.9 (C60): errors 409 conflict (details.reason no_billing_customer) when the account never bought; 502 checkout_failed when Stripe refuses. */
+  { opId: "billing.portal", method: "POST", path: "/billing/portal", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "BillingPortalInput", output: "BillingPortalSession", rate: "sensitive", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
   { opId: "checkout.get", method: "GET", path: "/orders/{ord}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "OrderRef", output: "Order", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
   { opId: "stripe.webhook", method: "POST", path: "/stripe/webhook", auth: ["stripe-webhook"], exposure: "gateway", transport: "raw", query: NOQ, input: "StripeEvent", output: "WebhookAck", rate: "webhook", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
   /** v0.1.4 (C49): public class; the handler verifies the svix signature (clerk_signature_invalid otherwise) before any state change. */

@@ -390,3 +390,6 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 
 ## v0.1.4 additions (C49)
 - Route `clerk.webhook` (`POST /clerk/webhook`, auth class `public`, the handler verifies the svix signature before any state change, `bodyLog: none`, registry Workspace + Account, audit `account.disable`). Explicit public rows are now five: `device.start`, `device.token`, `stripe.webhook`, `clerk.webhook`, `bridge_api.enrol`. A disabled or deleted Clerk user disables the account: every person route answers `403 account_disabled`. Core keeps no route outside `ROUTES` (one registry; no extension file).
+
+## v0.1.9 addition (C60)
+- Route `billing.portal` (`POST /billing/portal`, browser only, `bodyLog: none`, not idempotent, registry Entitlement): input `{returnPath}`, output `{url, expiresAt}` — a one-time Stripe customer-portal link (invoices, receipts), never stored or logged. Errors: `409 conflict` (`details.reason: no_billing_customer`) when the account never bought; `502 checkout_failed` when Stripe refuses.

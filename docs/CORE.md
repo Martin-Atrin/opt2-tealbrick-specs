@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.8 → v0.1.9 (additive; C60)
+- Route `billing.portal` (Stripe customer portal link; browser only, bodyLog none). 102 ops.
+
 ## Changelog v0.1.7 → v0.1.8 (text only)
 - CREDENTIALS §12: draft apply carries the draft `revision` (routes.ts `DraftApplyInput`), not a `draftDigest` (QA consistency finding).
 
