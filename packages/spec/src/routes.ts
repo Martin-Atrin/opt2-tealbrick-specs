@@ -496,6 +496,9 @@ export interface CatalogEntry {
   /** v0.1.14 (Fleet): the manifest declares `ui` (Open is possible); a launch without `path` lands on `launchPath` */
   hasUi?: boolean;
   launchPath?: string | null;
+  /** v0.1.22 (QA S3): a dev-only app that still runs in a STABLE workspace keeps its entry (from its running release, no
+   *  offers, no update); never set otherwise */
+  devOnly?: true;
   skills: string[];
   companions: { product: ProductId; purpose: string }[];
   costEstimate: CostEstimate | null;
@@ -650,7 +653,12 @@ export interface HookList { items: HookSubscription[] }
 export interface HookSetInput { ws: WorkspaceId; ins: InstanceId; hookId: string; enabled: boolean }
 
 // instances (deployment + registration in one record)
-export type DeployState = "queued" | "deploying" | "registering" | "running" | "failed" | "cancelled" | "removing" | "removed";
+/** v0.1.22: `refused` = the bridge refused the app's manifest and the app never ran (terminal until a clean report or a new
+ *  release; `lastError` carries the refusal code). It returns to `registering` / `running` on a clean bridge report. */
+export type DeployState = "queued" | "deploying" | "registering" | "running" | "failed" | "refused" | "cancelled" | "removing" | "removed";
+/** v0.1.22: bridge manifest refusal codes Core copies into `Instance.lastError.code` (a manifest validator issue code passes
+ *  through as a string; `manifest_rejected` = several codes in one report). */
+export type BridgeManifestRefusalCode = "manifest_mismatch" | "bridge_too_old" | "manifest_rejected" | (string & {});
 export interface Instance {
   id: InstanceId;
   ws: WorkspaceId;
@@ -673,7 +681,7 @@ export interface Instance {
   companionIssues?: { target: ProductId | "*"; edge: EdgeId | null; state: "blocked" | "not_deployed" | "unlicensed" | "paused" | "disabled"; reason: "companion_op_missing" | "target_not_deployed" | null; detail: string }[];
   provider: ProviderKey | "own_infra";
   settings: Record<string, SettingValue>;
-  lastError: { code: ErrorCode; message: string } | null;
+  lastError: { code: ErrorCode | BridgeManifestRefusalCode; message: string } | null;
   createdAt: IsoTime;
   /** v0.1.13 (C82): consents the release asks for (wildcard companion → `holds_pending_all`) and their state */
   consents?: InstanceConsent[];

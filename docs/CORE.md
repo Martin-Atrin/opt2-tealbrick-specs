@@ -2,6 +2,10 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.21 → v0.1.22 (G5 details; Core QA S2/S3)
+- `rules.narrowing`: tags compare after trim + lower case (`normalizeTag` / `tagsMatch`, manifest 0.1.15); `narrowing_unsupported` for reads that cannot honour the filter; receipt meta records the rule id; unknown-tag items dropped (SDK-API §18).
+- `DeployState` `refused`; `Instance.lastError.code` may carry a bridge manifest refusal code; `CatalogEntry.devOnly`; StatusReport `rejected[].ins`.
+
 ## Changelog v0.1.20 → v0.1.21 (C113; conformance 0.1.13 free port)
 - Release index `devOnly?: true` (signer DEV_ONLY_PRODUCTS); stable workspaces never get dev-only products (`release_not_deployable` + `details.reason "dev_only"`).
 - `RunningApp.port` + startApp harness `port`; conformance runner passes `TBCONF_PORT` (package 0.1.13, SDK 0.1.17, template 0.1.9).

@@ -441,3 +441,8 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 
 ## v0.1.21 additions
 - **C113 (live: Core 81c7c27, signer platform c27c643):** `ReleaseIndexEntry.devOnly?: true` (signed; every release of a `DEV_ONLY_PRODUCTS` product in ci/tb-ci.ts, always channel `dev`). A STABLE workspace never gets a dev-only product: not in its catalog (no dev-release fallback), and `instances.deploy`, own-infra registration, `instances.update` and `instances.rollback` answer `release_not_deployable` (409) with `details.reason: "dev_only"`. A dev workspace gets it as before.
+
+## v0.1.22 additions (Core QA S2/S3)
+- `DeployState` += `refused` (bridge refused the manifest; the app never ran) — `Instance.lastError.code` = `ErrorCode | BridgeManifestRefusalCode` (`manifest_mismatch`, `bridge_too_old`, a validator code, `manifest_rejected`).
+- `CatalogEntry.devOnly?: true` for a dev-only app still running in a stable workspace (entry from its running release, no offers, no update).
+- StatusReport `rejected[].ins?` (BRIDGE v0.1.22) — Core no longer infers the instance.
