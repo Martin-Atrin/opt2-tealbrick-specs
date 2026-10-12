@@ -88,6 +88,8 @@ export type BridgeErrorCode =
   | "rate_limited"
   | "sdk_major_unsupported"
   | "code_invalid"
+  /** v0.1.5 (C50): companion service claimed before its app; 503 + Retry-After, code not consumed */
+  | "app_not_claimed"
   | "manifest_mismatch"
   | "key_not_declared"
   | "key_not_set"

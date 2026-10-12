@@ -340,3 +340,5 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 - Core serves the row in `GET /internal/routes` (src/routes-ext.ts), so the generated gateway forwards it; Core deletes the extension when `@opt2-tealbrick/spec` includes the row.
 
 ## specs: DECIDED (C49) — in spec 0.1.4: route `clerk.webhook` (public, svix-verified, bodyLog none), error codes `clerk_signature_invalid` (401) and `account_disabled` (403), audit `account.disable`; Core drops routes-ext.ts. 405 `method_not_allowed` is in the §1.4 table.
+
+## specs: DECIDED (C50) — bridge error `app_not_claimed` (503 + Retry-After; claim not recorded, code not consumed); BRIDGE.md v0.1.5 addition; type union lands in spec 0.1.5.

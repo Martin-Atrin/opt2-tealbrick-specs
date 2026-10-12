@@ -321,3 +321,6 @@ None open for the bridge after C15/C16 and CORE §14. Settled items recorded for
 - Public routes: the app receives the full path `/p/<product>/<path>` (the SDK also matches `<path>` alone).
 - `ClaimResponse` carries no workspace id; apps take it from the first verified slice. Slice grant entries are matched to companion targets by `wf`.
 - `AppStatusResponse` does not refresh `app.publicKey`; `tb-exec` uses the key from its claim answer. Services report `AppStatus` with `scopesRev = 0`, `pendingHolds = 0`.
+
+## v0.1.5 addition (C50)
+- `POST /tb/v1/claim` from a companion service whose app instance has not claimed yet → `503 app_not_claimed` with `Retry-After` (seconds); the claim is not recorded and the service's enrolment code is not consumed. `tb-exec` retries with backoff.
