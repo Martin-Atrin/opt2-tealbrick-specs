@@ -626,3 +626,12 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - GUI: on `bridge_too_old` / `updateNeedsBridge`, offer "Update the bridge to X first" (bridge.deploy) before the app deploy/update.
 
 ## specs: DECIDED (spec 0.1.17) — StatusReport `rejected` kind `manifest` (refused app manifest + code), BRIDGE v0.1.17. Types in coordination/specs/types/bridge.ts; released with the next spec cut. Core: show it like the other rejected entries.
+
+## specs: DECIDED (C108, spec 0.1.17 text) — tolerant reader for grant `held`: unknown families ignored (shape still checked), implemented once in @opt2-tealbrick/manifest 0.1.11 `verifyGrant` (returns `held` filtered to KNOWN_HOLD_FAMILIES). Bridge 0.1.18: use manifest 0.1.11's verifyGrant/gate (no own held check). Declared unknown holdFamily in a manifest stays refused.
+
+## portal-core → specs (C106a adopt + C109): fields Core and the GUI use (live, Core 1527fe8 / GUI c726506), please type them
+- `DeviceStartAgentInput.agents[].adopt?: { grants: { product: ProductId; crud?: Crud[]; operations?: string[] }[] (≤ 16); channel?: { kind: "buzz_channel" | "connect_inbox"; id?: string; createName?: string (≤ 60) }; wake?: "serve" | "poll" | "none" }` (suggestion only).
+- `DeviceLookupInput.ws?: WorkspaceId` → `DeviceRequest.agents[].adopt?: { grants: { product, deployed, licensed, requestedCrud, read: { opId, title, checked }[], write: { opId, title, effect, holdFamily?, checked: false }[] }[]; channel?; wake? }` (agent-audience, non-money ops of the deployed release; write never pre-checked).
+- `DeviceApproveInput.agents[]`: `agt` optional when `name` is given (Core creates the card); `adopt?: { grants: { product, operations: string[] }[]; channel? }` — re-validated at approve; the whole approval is one transaction recorded as one applied draft; `DeviceDecision.draftId?`. A card created this way is `bound` with workflow = the ticked ops.
+- `Edge` row stores the requested channel (`scope_request`) for scopeType "channel": Connect needs it on tether — proposal: slice `agents[].scopeRequest?: {product, kind, id?, createName?}` (Core fills it once typed).
+- `CatalogEntry.operations[].holdFamily?: HoldFamily` (C109 review sheet: "asks you first").

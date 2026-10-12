@@ -203,7 +203,8 @@ export interface InstanceSlice extends SliceClaims {
   personNbf: EpochS;
   /** companion grants this app presents as `TB-Grant` (K10 compact JWS) */
   grants: CompactJws[];
-  agents: { id: AgentId; name: string; mode: AgentMode; status: "active" | "paused" }[];
+  /** v0.1.18 (C106a): `scopeRequest` = the channel the owner chose at adopt for an edge with scopeType "channel" (Connect tethers it) */
+  agents: { id: AgentId; name: string; mode: AgentMode; status: "active" | "paused"; scopeRequest?: ScopeRequest }[];
   standalone?: StandaloneState;
   /** v0.1.13 (C86): the Portal GUI origin (`https://…`, no path); apps build owner links (`/w/<ws>/open?product=&path=`) */
   portalUrl?: string;
@@ -497,6 +498,14 @@ export interface CallEnvelope<I = JsonValue> {
   /** set by the SDK to the current call id; used for hook re-entry and depth limits. v0.1.13 (C85): ABSENT for
    *  app-initiated calls (StartContext / events ctx / timers): the bridge audits them `call.app_initiated`. */
   parentCall?: CallId;
+}
+
+/** v0.1.18 (C106a) */
+export interface ScopeRequest {
+  product: ProductId;
+  kind: "buzz_channel" | "connect_inbox";
+  id?: string;
+  createName?: string;
 }
 
 // ── Reserved context (v0.1.13, G4b) ─────────────────────────────────────────

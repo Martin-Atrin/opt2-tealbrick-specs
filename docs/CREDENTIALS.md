@@ -308,3 +308,6 @@ None. (Key connections without a refresh token: accepted, C15.)
 
 ## v0.1.14 addition (C91)
 - Bridge-op proof (`bop` variant): claim set per `bop` is fixed — catalog `{bop, op}`, resolve `{bop, op, in}`, mark `{bop, in}`, scope_summary `{bop}` (SDK-API v0.1.14).
+
+## v0.1.17 addition (C108, tolerant reader)
+- Grant (K10) `held`: verifiers check only the SHAPE (≤ 32 unique tokens `^[a-z][a-z0-9_]{1,31}$`) and IGNORE families they do not know (`verifyGrant` returns `held` filtered to `KNOWN_HOLD_FAMILIES`); known families still hold, `money` is always held. A newer Core can add a family without breaking older bridges and apps; ignoring is safe because an app cannot declare a family it does not know (manifests that DECLARE an unknown `holdFamily` stay refused, M-OP-4 / schema). Hold verdicts (`hv.f`) stay strict (fail closed).

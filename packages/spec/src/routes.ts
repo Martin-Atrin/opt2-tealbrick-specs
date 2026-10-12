@@ -353,7 +353,8 @@ export interface DeviceStartAgentInput {
   /** harness option id */
   harness: string;
   /** v0.1.14 (C96): `name` (1..60, v0.1.15: = the agent card name rule) / `purpose` (≤ 280) are suggestions from the CLI; the owner may edit them on the device page */
-  agents: { agt?: AgentId; public_key: Jwk; name?: string; purpose?: string }[];
+  /** v0.1.18 (C106a): `adopt` = the CLI's SUGGESTED access for the new card (the owner decides on the device page) */
+  agents: { agt?: AgentId; public_key: Jwk; name?: string; purpose?: string; adopt?: AdoptSuggestion }[];
 }
 export type DeviceStartInput = DeviceStartOwnerInput | DeviceStartAgentInput;
 export interface DeviceStart {
@@ -379,7 +380,35 @@ export interface DeviceAgentTokenResult {
 }
 export type DeviceToken = DeviceOwnerTokenResult | DeviceAgentTokenResult;
 /** user_code as typed or from verification_uri_complete; normalised + digest-matched; 5 wrong codes / 10 min per account. */
-export interface DeviceLookupInput { userCode: string }
+/** v0.1.18 (C106a): adopt (agent onboarding with access in one approval) */
+export type AdoptChannel = { kind: "buzz_channel" | "connect_inbox"; id?: string; /** ≤ 60 */ createName?: string };
+export type AdoptWake = "serve" | "poll" | "none";
+export interface AdoptSuggestion {
+  /** ≤ 16 */
+  grants: { product: ProductId; crud?: Crud[]; operations?: string[] }[];
+  channel?: AdoptChannel;
+  wake?: AdoptWake;
+}
+/** Resolved by Core for the device page (needs `ws`): agent-audience, non-money ops of the deployed release; write ops never pre-checked. */
+export interface AdoptResolved {
+  grants: {
+    product: ProductId;
+    deployed: boolean;
+    licensed: boolean;
+    requestedCrud: Crud[];
+    read: { opId: string; title: string; checked: boolean }[];
+    write: { opId: string; title: string; effect: Effect; holdFamily?: HoldFamily; checked: false }[];
+  }[];
+  channel?: AdoptChannel;
+  wake?: AdoptWake;
+}
+/** The owner's choice at approve; re-validated by Core; the approval is ONE transaction recorded as one applied draft. */
+export interface AdoptChoice {
+  grants: { product: ProductId; operations: string[] }[];
+  channel?: AdoptChannel;
+}
+/** v0.1.18: `ws` lets Core resolve `adopt` against that workspace's deployed releases. */
+export interface DeviceLookupInput { userCode: string; ws?: WorkspaceId }
 /** One request. The user code itself is never returned. */
 export interface DeviceRequest {
   id: DeviceRequestId;
@@ -388,20 +417,23 @@ export interface DeviceRequest {
   machineLabel: string;
   harness: string | null;
   /** v0.1.14 (C96): suggested `name` / `purpose` as the client sent them (display + prefill only) */
-  agents: { index: number; agt: AgentId | null; publicKeyThumbprint: string; name?: string; purpose?: string }[];
+  agents: { index: number; agt: AgentId | null; publicKeyThumbprint: string; name?: string; purpose?: string; adopt?: AdoptResolved }[];
   state: "pending" | "approved" | "denied" | "expired" | "redeemed";
   createdAt: IsoTime;
   expiresAt: IsoTime;
 }
 /** scope agent: ws + one agent card per pair (by index; existing cards from agents.create). scope owner: neither. */
 /** v0.1.14 (C96): `name` / `purpose` = the owner's edits on the device page, applied to that agent card on approve. */
-export interface DeviceApproveInput { userCode: string; ws?: WorkspaceId; agents?: { index: number; agt: AgentId; name?: string; purpose?: string }[] }
+/** v0.1.18 (C106a): `agt` optional when `name` is given (Core creates the card: `bound`, workflow = the ticked ops of `adopt`). */
+export interface DeviceApproveInput { userCode: string; ws?: WorkspaceId; agents?: { index: number; agt?: AgentId; name?: string; purpose?: string; adopt?: AdoptChoice }[] }
 export interface DeviceDenyInput { userCode: string }
 export interface DeviceDecision {
   id: DeviceRequestId;
   state: "approved" | "denied";
   connections: { connectionId: ConnectionId; agt: AgentId }[];
   ownerSessionId: OwnerSessionId | null;
+  /** v0.1.18 (C106a): the applied draft that recorded an adopt approval */
+  draftId?: DraftId;
 }
 
 // catalog
@@ -450,7 +482,8 @@ export interface CatalogEntry {
   intents: string[];
   keywords: string[];
   release: ReleaseSummary;
-  operations: { id: string; title: string; crud: Crud; effect: Effect }[];
+  /** v0.1.18 (C109): `holdFamily` → the review sheet says "asks you first" when the family is held */
+  operations: { id: string; title: string; crud: Crud; effect: Effect; holdFamily?: HoldFamily }[];
   offers: OfferSummary[];
   deploySteps: DeployStep[];
   keyRequirements: KeyRequirement[];
