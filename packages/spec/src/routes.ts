@@ -393,6 +393,8 @@ export interface AdoptSuggestion {
 export interface AdoptResolved {
   grants: {
     product: ProductId;
+    /** v0.1.20 (F46): false = a deployed, licensed app the agent did NOT name, listed so the owner can add it (nothing ticked) */
+    suggested: boolean;
     deployed: boolean;
     licensed: boolean;
     requestedCrud: Crud[];
