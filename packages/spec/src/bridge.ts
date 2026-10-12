@@ -374,7 +374,7 @@ export const TOOL_NAME_RULE = {
   callSuffix: "_call",
   idempotencyMetaKey: "tealbrick/idempotencyKey", // gitleaks:allow (MCP _meta key name, not a secret)
   /** v0.1.13 (G4b): runner-set claim, copied UNVERIFIED into context `tb.onBehalfOf` */
-  onBehalfOfMetaKey: "tealbrick/onBehalfOf",
+  onBehalfOfMetaKey: "tealbrick/onBehalfOf", // gitleaks:allow (MCP _meta key name, not a secret)
   skillUriPrefix: "tealbrick://skills/",
 } as const;
 /** `<product>__<op>`, `<product>__<op>_search|_call`, `<product>__<dynamic list entry>`, `<product>__tb_hold_status`. */
