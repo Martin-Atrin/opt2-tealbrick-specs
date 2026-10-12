@@ -58,10 +58,11 @@ One envelope everywhere (CORE §8): `{ "error": { "code": "<snake_case>", "messa
 | Status | Codes |
 |---|---|
 | 400 | `bad_request`, `validation_failed`, `idempotency_key_required`, `draft_invalid`, `draft_op_not_draftable`, `draft_ref_invalid`, `draft_ref_money`, `recipe_not_portable`, `policy_invalid`, `authorization_pending`, `slow_down`, `access_denied`, `expired_token` (RFC 8628 codes, carried as `error.code`) |
-| 401 | `unauthenticated`, `bridge_key_revoked`, `enrolment_code_invalid`, `stripe_signature_invalid` |
+| 401 | `unauthenticated`, `bridge_key_revoked`, `enrolment_code_invalid`, `stripe_signature_invalid`, `clerk_signature_invalid` (v0.1.4) |
 | 402 | `licence_required` |
-| 403 | `forbidden` (wrong auth class for the row) |
+| 403 | `forbidden` (wrong auth class for the row), `account_disabled` (v0.1.4, C49) |
 | 404 | `not_found` |
+| 405 | `method_not_allowed` (known path, wrong method; v0.1.4, C46) |
 | 409 | `conflict`, `revision_conflict`, `idempotency_conflict`, `licence_already_assigned`, `licence_not_active`, `workspace_paused`, `workspace_standalone`, `workspace_not_empty`, `bridge_not_ready`, `destination_in_use`, `deploy_in_progress`, `instance_exists`, `draft_state` |
 | 413 / 429 | `payload_too_large` / `rate_limited` |
 | 422 | `manifest_invalid`, `release_not_deployable`, `offer_unavailable` |
@@ -384,3 +385,8 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 ## v0.1.3 additions (C38)
 - Bridge release records carry a `runtime` record (ports, health paths, volume + backup directory, env names each with `source: portal | provider-secret | public-url | fixed`) because the bridge has no app manifest; format in `opt2-tealbrick-platform` `registry/README.md`.
 - The Railway adapter sets `RAILWAY_RUN_UID=0` on services that mount a volume.
+- C40/C40a: harness options ship as data in the signed release index (`harnesses` section of frozen `HarnessOption` rows from types/routes.ts, unchanged), synced by Core; no hard-coded harness list.
+- C46 (approved): status table §1.4 gains `405 method_not_allowed` (known path, wrong method), with the one error envelope.
+
+## v0.1.4 additions (C49)
+- Route `clerk.webhook` (`POST /clerk/webhook`, auth class `public`, the handler verifies the svix signature before any state change, `bodyLog: none`, registry Workspace + Account, audit `account.disable`). Explicit public rows are now five: `device.start`, `device.token`, `stripe.webhook`, `clerk.webhook`, `bridge_api.enrol`. A disabled or deleted Clerk user disables the account: every person route answers `403 account_disabled`. Core keeps no route outside `ROUTES` (one registry; no extension file).

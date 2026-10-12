@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.3 → v0.1.4 (additive; C44, C46, C49)
+- C49 route `clerk.webhook` + codes `clerk_signature_invalid`, `account_disabled` + audit `account.disable`; C46 405 `method_not_allowed` in PORTAL-API §1.4; C44 `sdkMajorOf` (manifest 0.1.2); one `when` evaluation (manifest 0.1.3).
+
 ## Changelog v0.1.1 → v0.1.3 (additive; C31, C33, C35, C38)
 - C31/C33 SDK context fields and `onStart` in types/sdk.ts; C35 eleven SPEC-GAP clarifications (MANIFEST, BRIDGE, SDK-API v0.1.3 sections), `TB_KEK` exactly 32 bytes; C38 bridge release `runtime` record + `RAILWAY_RUN_UID=0`. (spec 0.1.1 tarball withdrawn; content shipped as 0.1.2.)
 

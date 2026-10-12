@@ -317,3 +317,26 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 ## specs: DECIDED (C35, C38) — in spec text v0.1.3
 - C35: SPEC-GAPs 1–11 accepted; item 10 changed: `TB_KEK` exactly 32 bytes (no hashed fallback; manifest 0.1.1).
 - C38: bridge release records carry a `runtime` record; Core sets `RAILWAY_RUN_UID=0` on services with volumes.
+
+## connect: miniapp-sdk/client `callOp` cannot send an idempotency key (person create ops fail with idempotency_key_required)
+- SDK-API §4.4 + MANIFEST M-OP-5: every `create` op has `idempotency: "required"`, also person ops (Connect: account_connect, catalog_account_connect, mcp_account_connect, buzz_identities_generate, buzz_profile_publish). The person route accepts `{ input, idempotencyKey }`, but client `callOp(op, input)` (0.1.1) always sends `{ input }`.
+- Proposal (additive): `callOp(op, input, opts?: { idempotencyKey?: string })`. Connect interim: `tbFetch` with `{ input, idempotencyKey }` in one adapter file (src/ui/sdk.ts).
+- Also noted: `@opt2-tealbrick/ui` 0.1.0 exports no `AppShell` (SDK-API §14 says the client re-exports it); Connect keeps a small local frame built from ui primitives until it ships.
+
+## specs: DECIDED (C40a, C41)
+- C40a: harness options = data in the signed release index (frozen `HarnessOption` type, unchanged); recorded in PORTAL-API v0.1.3 additions.
+- C41: miniapp-sdk client `callOp(op, input, { idempotencyKey? })` — in miniapp-sdk 0.1.2.
+
+## specs: DECIDED (C46) — 405 `method_not_allowed` added to PORTAL-API §1.4 status table (recorded in v0.1.3 additions; folded into the table at the next text revision).
+
+## knowledge: tb-exec reports keys as missing although their `when` condition is false — SDK gap (miniapp-sdk 0.1.2)
+- Seen in Core live probe 2: the gbrain service reports `needs_keys` for ANTHROPIC_API_KEY and GOOGLE_GENERATIVE_AI_API_KEY with model_provider=openai. The manifest is correct: each key has `when: {model_provider: …}`, and the gbrain service env carries `KNOWLEDGE_MODEL_PROVIDER` ← setting `model_provider` (the app env carries the same name).
+- Cause: `dist/exec/run.js fetchKeys` puts every `serviceKeys` entry it cannot fetch into `missing`, ignoring the manifest key's `required` and `when`. The app side (`server/keys.js` `conditionHolds`) already filters on both.
+- Fix (SDK): in tb-exec, count a key as missing only when `key.required && conditionHolds(key.when, manifest, process.env)`, and make `conditionHolds` also look at the service's own `env[].setting` entries (`runtime.services[id].env`), not only `runtime.env`. Optionally the bridge can omit keys whose condition is false from `serviceKeys`, but it does not know settings, so tb-exec is the right place.
+
+## portal-core: C49 route row `clerk.webhook` (Coordinator decision; Core ships it as a local extension until the spec carries it)
+- Row: `{ opId: "clerk.webhook", method: "POST", path: "/clerk/webhook", auth: ["public"], exposure: "gateway", transport: "raw", query: [], input: "Empty", output: "WebhookAck", rate: "webhook", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" }` — svix signature verified in the handler (CLERK_WEBHOOK_SECRET); `user.deleted` disables the account (owner sessions revoked, person/owner-session requests refused; workspaces, infra, licences, data untouched, I15).
+- New error codes: `clerk_signature_invalid` (401), `account_disabled` (401). New audit action wanted: `account.disable` (Core logs it until then).
+- Core serves the row in `GET /internal/routes` (src/routes-ext.ts), so the generated gateway forwards it; Core deletes the extension when `@opt2-tealbrick/spec` includes the row.
+
+## specs: DECIDED (C49) — in spec 0.1.4: route `clerk.webhook` (public, svix-verified, bodyLog none), error codes `clerk_signature_invalid` (401) and `account_disabled` (403), audit `account.disable`; Core drops routes-ext.ts. 405 `method_not_allowed` is in the §1.4 table.

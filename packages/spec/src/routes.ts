@@ -100,6 +100,8 @@ export const RATE_CLASSES = {
 // Free-string actions are impossible: AuditEvent.action is this union. No behaviour reads audit rows.
 export const AUDIT_ACTIONS = [
   "account.set_current_workspace",
+  /** v0.1.4 (C49): Clerk webhook disabled/deleted a person → account disabled */
+  "account.disable",
   "workspace.create", "workspace.update", "workspace.delete", "workspace.set_infrastructure",
   "workspace.pause", "workspace.resume", "workspace.standalone",
   "provider.link", "provider.link_token", "provider.unlink", "provider.destination_create",
@@ -133,6 +135,7 @@ export type ErrorCode =
   | "draft_invalid" | "draft_op_not_draftable" | "draft_ref_invalid" | "draft_ref_money"
   | "draft_state" | "recipe_not_portable" | "authorization_pending" | "slow_down" | "access_denied"
   | "expired_token" | "enrolment_code_invalid" | "bridge_key_revoked" | "stripe_signature_invalid"
+  | "clerk_signature_invalid" | "account_disabled"
   | "offer_unavailable" | "checkout_failed" | "upstream_timeout" | "internal";
 /** CORE §8: the one error envelope. */
 export interface ErrorEnvelope { error: { code: ErrorCode; message: string; requestId: string; details?: Record<string, unknown> } }
@@ -610,6 +613,8 @@ export interface UnpaidCount { ws: WorkspaceId; count: number; products: Product
 /** Raw Stripe event body; verified with the sealed webhook secret before parsing. */
 export interface StripeEvent { id: string; type: string; livemode: boolean; data: { object: Record<string, unknown> } }
 export interface WebhookAck { received: true }
+/** v0.1.4 (C49): Clerk webhook event (svix-signed; verified with the Clerk webhook signing secret held sealed in Core). */
+export interface ClerkEvent { type: string; object: "event"; data: Record<string, unknown> }
 
 // skills
 export interface SkillsInput { ws: WorkspaceId; agt?: AgentId }
@@ -761,7 +766,7 @@ export interface SchemaMap {
   TicketResult: TicketResult;
   Licence: Licence; LicenceListInput: LicenceListInput; LicenceList: LicenceList; LicenceRef: LicenceRef;
   LicenceTargetInput: LicenceTargetInput; LicenceChange: LicenceChange; CheckoutInput: CheckoutInput; Checkout: Checkout;
-  OrderRef: OrderRef; Order: Order; UnpaidCount: UnpaidCount; StripeEvent: StripeEvent; WebhookAck: WebhookAck;
+  OrderRef: OrderRef; Order: Order; UnpaidCount: UnpaidCount; StripeEvent: StripeEvent; WebhookAck: WebhookAck; ClerkEvent: ClerkEvent;
   SkillsInput: SkillsInput; SkillBundle: SkillBundle; SkillOverrideInput: SkillOverrideInput; SkillKeyRef: SkillKeyRef;
   SkillFile: SkillFile; ZipFile: ZipFile; DesktopDownload: DesktopDownload;
   OwnerSessionList: OwnerSessionList; OwnerSessionRef: OwnerSessionRef;
@@ -904,6 +909,8 @@ export const ROUTES = [
   { opId: "checkout.create", method: "POST", path: "/checkout", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "CheckoutInput", output: "Checkout", rate: "sensitive", bodyLog: "meta", audit: "order.create", draftable: true, confirm: true, idempotent: true, registry: "entitlement" },
   { opId: "checkout.get", method: "GET", path: "/orders/{ord}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "OrderRef", output: "Order", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
   { opId: "stripe.webhook", method: "POST", path: "/stripe/webhook", auth: ["stripe-webhook"], exposure: "gateway", transport: "raw", query: NOQ, input: "StripeEvent", output: "WebhookAck", rate: "webhook", bodyLog: "none", audit: null, draftable: false, confirm: false, idempotent: false, registry: "entitlement" },
+  /** v0.1.4 (C49): public class; the handler verifies the svix signature (clerk_signature_invalid otherwise) before any state change. */
+  { opId: "clerk.webhook", method: "POST", path: "/clerk/webhook", auth: ["public"], exposure: "gateway", transport: "raw", query: NOQ, input: "ClerkEvent", output: "WebhookAck", rate: "webhook", bodyLog: "none", audit: "account.disable", draftable: false, confirm: false, idempotent: false, registry: "workspace" },
 
   // skills
   { opId: "skills.get", method: "GET", path: "/workspaces/{ws}/skills", auth: BO, exposure: "gateway", transport: "json", query: ["agt"], input: "SkillsInput", output: "SkillBundle", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
