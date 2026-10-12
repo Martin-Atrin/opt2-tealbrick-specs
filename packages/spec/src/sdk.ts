@@ -624,7 +624,7 @@ export interface RulesNarrowingV1 {
   ruleId: string;
   reason: string;
   memoryTags?: {
-    /** keep only results with at least one of these tags (each ≤ 64 chars, ≤ 32 per list) */
+    /** keep only results with at least one of these tags (each ≤ 64 chars, ≤ 32 per list). v0.1.23 (C115): present but EMPTY = nothing passes */
     anyOf?: string[];
     /** drop results with any of these tags */
     noneOf?: string[];

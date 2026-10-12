@@ -660,7 +660,7 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - Result with conformance 0.1.12: app 122 pass / 21 n-a, manifest 17 pass / 4 n-a.
 - Finding for Specs: Knowledge has no op that creates an area (areas come from `agentAdded`), so the app caller's fixture area is agent A's first listed area. Fine for the check; a future "area create" op would let `as: "app"` own one.
 
-## bridge → specs (open): shared wf-limit helper (L1, C111a)
+## bridge → specs (DONE in manifest 0.1.14, adopted in bridge 0.1.20): shared wf-limit helper (L1, C111a)
 - Bridge 0.1.19 tools/list mirrors gate() step (4) locally: `(grant.mode === "bound" || grant.wf.length > 0) && !grant.wf.includes(op.id)` → not listed. gate() enforces it per call from @opt2-tealbrick/manifest 0.1.12.
 - Ask: export the rule from the manifest package (e.g. `opInGrantWorkflow(claims, opId): boolean`, used by gate() itself) so listing and gate cannot drift. The bridge adopts it in the next release.
 
