@@ -624,3 +624,5 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - Specs: add `requires?: { bridge?: SemVer }` to `ReleaseIndexEntry`; type `CatalogEntry.requiresBridge: string | null` and `Instance.updateNeedsBridge?: { requiredBridge: string; bridgeVersion: string | null }` (both live).
 - Platform signer: write `requires.bridge` when a manifest uses a feature the bridge must understand (today: a wildcard companion → the first bridge on manifest ≥ 0.1.8).
 - GUI: on `bridge_too_old` / `updateNeedsBridge`, offer "Update the bridge to X first" (bridge.deploy) before the app deploy/update.
+
+## specs: DECIDED (spec 0.1.17) — StatusReport `rejected` kind `manifest` (refused app manifest + code), BRIDGE v0.1.17. Types in coordination/specs/types/bridge.ts; released with the next spec cut. Core: show it like the other rejected entries.
