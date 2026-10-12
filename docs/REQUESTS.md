@@ -601,7 +601,7 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - Fleet 0.1.2 declares `configurePath: "/"` as the fix on its side. Ask: Core adds `hasUi: !!m.ui` (or the GUI gates Open on `launchPath`), and `useLauncher` falls back to `launchPath` when there is no configurePath; keep `hasConfigureUi` for the configure affordance only.
 
 ## portal-core → specs + bridge: connection activity in StatusReport (`connectionsSeen`)
-- Nothing on the wire tells Core that a connection was used, so `AgentConnection.lastSeenAt` stayed null (QA: Foxy Codex con_01M4RAQB5HM2DF3GZCG2J88326).
+- Nothing on the wire tells Core that a connection was used, so `AgentConnection.lastSeenAt` stayed null (QA: an agent connection con_01M4RAQB5HM2DF3GZCG2J88326).
 - Proposal: `StatusReport.connectionsSeen?: { con: ConnectionId; lastSeen: IsoTime }[]` — connections that authenticated (agent assertion / pairing session) since the previous report, max 500, latest time per connection. Core f5c0e13 already reads it: forward only, future times clamped to now, unknown or foreign ids ignored, no config change.
 - Bridge: send it in every ack. Spec: add the optional field.
 
