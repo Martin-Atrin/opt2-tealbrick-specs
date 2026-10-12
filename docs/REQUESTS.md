@@ -406,3 +406,28 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 - `dropPrivileges` (miniapp-sdk src/server/privilege.ts) is not exported, and the bridge depends on `@opt2-tealbrick/manifest` only (REPOS §3). Please export it so bridge-server reuses it instead of a second copy. Preferred: move `dropPrivileges`/`RUN_UID`/`RUN_GID`/`PrivilegeProc` into `@opt2-tealbrick/manifest` (it only needs node:fs + process ids) and re-export from miniapp-sdk; alternative: a miniapp-sdk subpath `@opt2-tealbrick/miniapp-sdk/privilege` with no other imports. The bridge calls it with `{ dataDir: TB_DATA_DIR, backupDir: TB_DATA_DIR }` before loading state or listening, and refuses to keep running as root otherwise.
 
 ## specs: DONE (C64 S1) — spec 0.1.10: instance-slice `bridge.publicUrl` (schema + types). Core: emit it in slices; SDK reads it into OpContext.publicUrl.
+
+## portal-core → bridge (C62 BSD-08/BSD-15): StatusReport fields Core now reads
+- Core d4df802 reads two OPTIONAL StatusReport fields (already in the spec type? if not, additive): `portalKeysDigest` (JCS digest of the `portalKeys` array of the config revision the bridge acks) and `apps[].sliceRevision` (config revision whose slice the app last fetched).
+- `portalKeysDigest`: Core compares it to the digest of the portalKeys it signed for that revision; a mismatch logs an error and raises a GlitchTip alert (BSD-08 short term). Without it, no check runs.
+- `apps[].sliceRevision`: Core marks an instance as moved to the transition key (BSD-15) when `sliceRevision >= transition_rev`. Without it, Core falls back to `apps[].lastSeen > transition_acked_at + 5 s`.
+- Ask: bridge sends both in every ack. Spec: add them to `StatusReport` if they are missing.
+
+## bridge → specs (C62 BSD-08/BSD-15, 2026-10-12): StatusReport additive fields
+- Bridge 0.1.12 sends two fields Core reads (see "portal-core → bridge" above); spec 0.1.10 `StatusReport` lacks them.
+- Add, additive and optional: `portalKeysDigest?: Sha256Digest` (JCS `digest()` of the `portalKeys` array the bridge trusts after applying `rev`) and `apps[].sliceRevision?: number` (AppStatus.sliceRevision the app last reported; omitted before its first report).
+- Bridge carries a local `StatusReportV12` extension until the spec type lands; it drops it on the next spec bump.
+
+## portal-core → bridge: companion key fetch answers `key_not_declared` while the app's manifest is not loaded (QA, GBrain 05:11:37Z)
+- Trace (qa1, ins_01M4PRKZJGTYG7KNHGSMR6252Y): 05:11:04 an update moved Knowledge 0.1.7 → 0.1.6. Bridge applied rev 85/86 (manifestDigest 0.1.6) and logged `bridge.manifest.unavailable` (fetch_failed, then manifest_mismatch: the app still served 0.1.7). 05:11:37 the new GBrain container (svc `gbrain`) asked for OPENAI_API_KEY and got `key_not_declared`. Core's signed config at that revision listed OPENAI_API_KEY usedBy [gbrain, app] for that instance (all of knowledge 0.1.6/0.1.7/0.1.8 declare it so).
+- Cause: `keyFetch` → `activeKeys(t, ins, app?.manifest, svc)` also requires the app's LIVE manifest (`app.manifest`). While the main app is down, restarting or serving another digest, `app.manifest` is undefined, so every companion key fetch is refused with the permanent-looking 403 `key_not_declared`. Companions usually start before the main app, so this hits every update.
+- Ask: decide the declaration from the signed config `keyRequirements` (ins + usedBy + source), which Core derives from the signed manifest. If the bridge must keep the manifest cross-check, answer a retryable `503 app_unavailable` (with Retry-After) while the manifest is not loaded, never `key_not_declared`. Add a test: app down + companion key fetch → key delivered (or 503), not 403.
+
+## portal-core → knowledge: GBrain crash-loops on a stale apply-migrations lock after its container is stopped mid-migration
+- qa1 GBrain service: deployment 05:11:08 (0.1.6) was stopped at 05:12:24 (exit 143) by the next update. Both later deployments (05:12:07 and 05:19:38, 0.1.7 @52ecb680) crash-loop: `apply-migrations refused: another apply-migrations is running (host ffdcf33f76ab, pid 21)` → tb-exec exitCode 75 → Railway FAILED. The lock on the volume names a host that no longer exists.
+- Ask: treat the lock as stale when its host differs from the current host (or the pid is dead / older than N minutes) and take it over; release it on SIGTERM. Today GBrain on qa1 is down until the lock is cleared.
+- Core (bd8debf) now fails the instance when a companion's latest deployment fails, so the owner sees it.
+
+## specs: DECIDED (C69c) — spec 0.1.11: `SettingFieldView.mutable?: boolean` (types/routes.ts).
+
+## specs: DECIDED (C71) — spec 0.1.11: release-index body types incl. `ReleaseSourceRecord.context` (repo-relative build root, = manifest runtime.build root).

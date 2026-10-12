@@ -2,6 +2,12 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.10 → v0.1.11 (C62/C63, BSD-07, C70)
+- C62/C63 (BSD-08) offline Portal Root Keys: two root keys (dev pair now, production pair at the cutover ceremony) pinned as release data (`PORTAL_ROOT_KEYS`, credentials.ts) sign key-set statements (`tb-keyset+jws`, monotonic `seq`); config, slice and enrolment response carry the current statement as `portalKeySet`; trusted Portal keys come ONLY from the newest root-signed statement; `portalKeys` informational for one minor; `keySetAnnounce` leaves the trust path (§4, CREDENTIALS §9.5, BRIDGE §4–5, SDK-API §9; manifest 0.1.6, miniapp-sdk 0.1.11, conformance 0.1.7).
+- BSD-07: `apps[].internalUrl` = `http://<name>.railway.internal:<port>`, or any http(s) origin only with `ownInfra: true` AND listed in the bridge-local env `TB_OWN_INFRA_ORIGINS` (never set by Portal); same rule for neighbour claims; refuse code `internal_url_refused` (BRIDGE §5.7).
+- C70: bridge refuse code `grant_stale` (BRIDGE §8.4); CONFORMANCE A12 companion calls; MANIFEST path bases (build paths repo-relative, skill/app files manifest-relative).
+- C63a dated rule: the no-statement fallback (CREDENTIALS §9.5 rule c) applies ONLY while nothing is pinned; after a pin a missing or invalid statement is refused for config, slice and bridge re-enrolment. **0.1.12 (date = Core emits `portalKeySet`; record the date here at release): fallback removed** — builds that pin roots refuse a first enrolment and a first slice without a valid statement.
+
 ## Changelog v0.1.9 → v0.1.10 (C59)
 - Key page on its own origin: bridge env `TB_KEYS_PUBLIC_URL` (second public domain); `/keys` only there (main origin 404, unset 503 "key page not configured"), that origin serves only `/keys` + health; key-page CSP `form-action 'self'`; `tickets.keys` url on the keys origin; ticket `aud` unchanged (BRIDGE §3.1/§9.3, PORTAL-API, CONFORMANCE B11b; conformance 0.1.6).
 
@@ -68,7 +74,8 @@ Machine-readable files in `specs/` (JSON Schema draft 2020-12, TypeScript `.ts` 
 
 ## 4. Trust chain (who trusts which key)
 ```
-Portal signing key (sealed in Core) ──signs──► workspace config (for the bridge)
+Portal Root Keys (offline, 2: root-a + root-b; v0.1.11) ──signs──► key-set statement (tb-keyset+jws: the Portal signing keys + status, seq)
+Portal signing key K12 (sealed in Core, listed in the statement) ──signs──► workspace config (for the bridge)
                                       ├─signs──► instance slice (per app, relayed by the bridge)
                                       ├─signs──► grants (agent→app, app→app)
                                       └─signs──► person tickets (launch | keys)
@@ -76,8 +83,9 @@ Bridge key (generated in the bridge, never leaves it) ─signs─► agent sessi
 Instance key (generated in each app instance) ─signs─► instance assertions (to the bridge)
 Agent connection key (generated on the agent machine) ─signs─► agent assertions (to the bridge)
 ```
-- The bridge learns Portal's key set in the enrolment response (TLS to the Portal domain) and pins it. Apps learn Portal's key set from the deploy env (`TB_PORTAL_KEYS`, public values only) and from instance slices.
-- Rotation: a new Portal key is announced in config/slices ≥ 24 h before first use; a key is trusted only if announced by a document signed with an already-trusted key; retired keys stay verifiable until every token they signed has expired (≤ 12 h).
+- v0.1.11 (C62/C63): the root PUBLIC keys are release data (`PORTAL_ROOT_KEYS` in `@opt2-tealbrick/spec`, embedded in every bridge and SDK build; dev-channel builds pin the dev pair, stable builds pin only the production pair). The trusted Portal key set is derived ONLY from the newest valid root-signed key-set statement (`portalKeySet` in the enrolment response, every config and every slice): `seq` monotonic, pinned in the bridge's sealed state and the app store. A K12 holder can sign configs but can no longer change the key set. Root change = spec + bridge/SDK release (no in-band root rotation). Details, transition rule and ceremonies: CREDENTIALS §9.5.
+- Before v0.1.11 (and during the transition, CREDENTIALS §9.5): the bridge learns Portal's key set in the enrolment response (TLS to the Portal domain) and pins it; apps learn it from the deploy env (`TB_PORTAL_KEYS`, public values only) and from instance slices.
+- Rotation: a new Portal key is announced (`pending`) in a key-set statement ≥ 24 h before first use; retired keys stay verifiable for tokens until every token they signed has expired (≤ 12 h); configs and slices are accepted only from `active` or `pending` keys of the newest statement.
 - Standalone (leaving Portal): Portal signs a final config with `standalone.issuer = <bridge key>`; from then on the bridge signs configs/slices/grants/tickets with its own key and apps accept it because a Portal-signed slice named it (BRIDGE.md §Standalone).
 
 ## 5. Credential kinds (complete list — CREDENTIALS.md details each)

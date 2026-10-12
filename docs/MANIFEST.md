@@ -11,7 +11,7 @@ On Railway one volume per service: the deploy recipe mounts the `data` volume an
 
 | Item | Rule |
 |---|---|
-| File | `tealbrick.manifest.json` at the app repo root. The SDK serves it verbatim at `GET <internalUrl>/tb/v1/manifest`; CI attaches the same bytes to the release. |
+| File | `tealbrick.manifest.json` at the app directory (the repo root of a single-app repo; one directory per app in a multi-app repo, §3). The SDK serves it verbatim at `GET <internalUrl>/tb/v1/manifest`; CI attaches the same bytes to the release. |
 | Version | `schema: "tealbrick.miniapp/2"`, the only accepted value. No `legacy`/compat values, no negotiated version header (CORE §11). |
 | Strictness | Every object is closed (`additionalProperties: false`), except the JSON Schemas inside `operations[].input/output`. No `x-` extensions. |
 | Size | ≤ 256 KiB of JCS bytes; ≤ 128 operations. |
@@ -45,6 +45,15 @@ Meaning of effects: `read` = no state change; `write` = changes app-internal sta
 
 ## 3. Identity and discovery
 
+**Path bases (v0.1.11, C70).** Every file path in the manifest has exactly one base:
+
+| Path | Base |
+|---|---|
+| `runtime.build.context`, `runtime.build.dockerfile`, `runtime.services[].build.context`, `runtime.services[].build.dockerfile` | the REPOSITORY ROOT (repo-relative): CI hands them to the image builder, which runs at the repo root. |
+| `skills[].file` and every other app file the manifest names | the MANIFEST DIRECTORY (manifest-relative): the directory that contains `tealbrick.manifest.json`. |
+
+A single-app repo keeps the manifest at the repo root, so both bases are the same directory. A multi-app repo keeps one manifest per app directory (e.g. `sample-gate/tealbrick.manifest.json`): there `build.context` is `sample-gate` and `build.dockerfile` is `sample-gate/Dockerfile` (repo-relative), while a skill is `skills/use-sample-gate/SKILL.md` (next to the manifest). No path may leave its base (`..` escapes are refused). `validateAppFiles(m, repoDir, manifestDir = repoDir)`, `tb-gen` and conformance check M6.paths follow this table.
+
 | Field | Type / limit | Meaning |
 |---|---|---|
 | `id` | `^[a-z][a-z0-9-]{1,31}$` | Product id (CORE §1). Data only; no code branches on it. |
@@ -63,7 +72,7 @@ Meaning of effects: `read` = no state change; `write` = changes app-internal sta
 
 ## 4. Runtime
 
-The app container is always built from source: `runtime.build {context, dockerfile}` (repo-relative). CI pins the result by digest in the release record.
+The app container is always built from source: `runtime.build {context, dockerfile}` (repo-relative, §3). CI pins the result by digest in the release record.
 
 | Field | Meaning |
 |---|---|
@@ -92,6 +101,7 @@ Env value templates (the only `{{…}}` forms allowed): `{{services.<id>.url}}` 
 | M-RT-6 | A service with `backup`, `helper`, or any key in its `usedBy` must use `build` (it needs the `tb-exec` entrypoint) → `wrapper_required`. |
 | M-RT-7 | `helper.port` ≠ service `port` → `helper_port`. |
 | M-RT-8 | `when` follows M-ST-3 (enum/boolean fields only). |
+| M-RT-9 | `validateAppFiles` (CI, CLI, v0.1.11): each `build.context` is a directory and each `build.dockerfile` a file under the REPO root, none escaping it (§3) → `build_path_invalid`. |
 
 ## 5. Operations
 
@@ -220,13 +230,13 @@ Hooks match only `agent`-audience manifest operations reached through the bridge
 
 ## 10. Skills and harness hints
 
-- `skills[] {id, title, file, when?}`: `file` is a repo-relative `SKILL.md` (YAML frontmatter `name` = id, `description`; markdown body). Allowed variables: `{{agent.name}}`, `{{agent.id}}`, `{{workspace.name}}`, `{{settings.<key>}}`, `{{scope.<type>.<kind>}}` (label of the caller's default-grant instance of that kind). CI packs the files into the release's skills archive (`skillsDigest` in the release record, C17). Content is sanitized once: `validateAppFiles` in CI for app files, and Core's render for owner overrides; the bridge does no content filtering. One function `renderSkill(file, vars)` in `@opt2-tealbrick/manifest` substitutes variables; Core uses it for the workspace bundle (workspace variables, owner overrides) and the bridge for per-agent variables `{{agent.*}}` only. The bridge and serves skills as MCP resources plus an index in `initialize.instructions` (CORE §13).
+- `skills[] {id, title, file, when?}`: `file` is a manifest-relative `SKILL.md` (relative to the directory of the manifest file, §3; not to the repo root) (YAML frontmatter `name` = id, `description`; markdown body). Allowed variables: `{{agent.name}}`, `{{agent.id}}`, `{{workspace.name}}`, `{{settings.<key>}}`, `{{scope.<type>.<kind>}}` (label of the caller's default-grant instance of that kind). CI packs the files into the release's skills archive (`skillsDigest` in the release record, C17). Content is sanitized once: `validateAppFiles` in CI for app files, and Core's render for owner overrides; the bridge does no content filtering. One function `renderSkill(file, vars)` in `@opt2-tealbrick/manifest` substitutes variables; Core uses it for the workspace bundle (workspace variables, owner overrides) and the bridge for per-agent variables `{{agent.*}}` only. The bridge and serves skills as MCP resources plus an index in `initialize.instructions` (CORE §13).
 - `harnessHints[] {harness, instructions ≤ 1000}`: short plain-text notes per harness kind (`generic` applies to all). They feed the generated instruction set and kit README. No harness-specific code, config or commands.
 
 | Rule | Check |
 |---|---|
 | M-SK-1 | Skill ids and files unique; `when` per M-ST-3 → `skill_invalid`. |
-| M-SK-2 | `validateAppFiles` (CI, CLI): each file exists, frontmatter matches, only allowed variables, `{{settings.<key>}}` names a declared field; content sanitized (no raw HTML/script, no MCP-directive or tool-call markup, ≤ 64 KiB) → `skill_file_invalid`. |
+| M-SK-2 | `validateAppFiles` (CI, CLI): each file exists (resolved from the manifest directory, §3), frontmatter matches, only allowed variables, `{{settings.<key>}}` names a declared field; content sanitized (no raw HTML/script, no MCP-directive or tool-call markup, ≤ 64 KiB) → `skill_file_invalid`. |
 | M-HH-1 | One hint per harness kind → `hint_duplicate`. |
 
 ## 11. Backups and export
@@ -252,7 +262,7 @@ The SDK backup runner (inside the app container) runs on `backups.schedule` (5-f
 
 ## 13. One validator package
 
-`@opt2-tealbrick/manifest` (REPOS.md) is the only implementation, used by Core (Manifest Store, catalog, deploy), the SDK (boot), the bridge (config apply), the CLI and conformance. Nobody re-implements a rule. Surface: `validateManifest(input): ManifestValidation` (schema + all `M-*` rules; issues `{path (RFC 6901), rule, code, message}`), `manifestDigest(m)`, `validateCompanions(m, targets)`, `validateAppFiles(m, repoDir)` (CI/CLI only), `renderSkill(file, vars)` (§10), the vocabularies (§2), plus `verifyGrant`, `verifyBridgeOpProof`, `gate`, `authorize` (CORE §7). Warnings do not exist: a rule passes or the manifest is refused.
+`@opt2-tealbrick/manifest` (REPOS.md) is the only implementation, used by Core (Manifest Store, catalog, deploy), the SDK (boot), the bridge (config apply), the CLI and conformance. Nobody re-implements a rule. Surface: `validateManifest(input): ManifestValidation` (schema + all `M-*` rules; issues `{path (RFC 6901), rule, code, message}`), `manifestDigest(m)`, `validateCompanions(m, targets)`, `validateAppFiles(m, repoDir, manifestDir = repoDir)` (CI/CLI only), `renderSkill(file, vars)` (§10), the vocabularies (§2), plus `verifyGrant`, `verifyBridgeOpProof`, `gate`, `authorize` (CORE §7). Warnings do not exist: a rule passes or the manifest is refused.
 
 ## 14. Generated artifacts (no hand-written copies)
 
@@ -316,3 +326,6 @@ None. v0.1 review items applied: S6 (§7), S8 + N6 (§10, §13), N1 (§2, §5.4)
 - `runtime.env[].value` may use the template `{{services.<id>.url}}`; Core's deploy recipe renders it to that service's private URL. It is how an app (and `callServiceHelper`) learns a companion service's address.
 - Validator codes added to the rule table: `operation_duplicate`, `manifest_too_large` (rule M-DOC-0, 256 KiB), `schema_invalid` (rule `schema`), `hand_written_artifact`. SPDX: an embedded open-source id list; `LicenseRef-*` refused. A setting's default is not matched against its app-supplied `pattern` by Core (ReDoS guard); the pattern must compile.
 - `tb-exec` reads the manifest from `--manifest <path>` (default `/opt/tb/tealbrick.manifest.json`); service images copy the app manifest there.
+
+## v0.1.11 additions (C70)
+- Path bases (§3, §4, §10): build paths (`runtime.build`, `runtime.services[].build`) are repo-relative; skill files and other app files are manifest-relative (relative to the directory that contains the manifest file). `validateAppFiles(m, repoDir, manifestDir = repoDir)` resolves build paths from `repoDir` and skill files from `manifestDir`; `tb-gen` takes the same two directories (`--repo <dir>`; manifest dir = directory of `--manifest`); conformance check M6.paths asserts it. New rule M-RT-9, code `build_path_invalid` (`validateAppFiles` only): a build context is not a directory, or a Dockerfile is not a file, under the repo root.

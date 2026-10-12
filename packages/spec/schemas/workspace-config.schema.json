@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://spec.opt2.tealbrick.com/workspace-config.schema.json",
   "title": "Workspace config payload (tb-config+jws)",
-  "description": "v0.1. JWS payload of the signed workspace config pulled by the bridge (BRIDGE.md §5.5). Signed by Portal (iss tb:portal); in standalone the bridge re-mints from the frozen final config (BRIDGE §11). $defs are shared with instance-slice.schema.json.",
+  "description": "v0.1. JWS payload of the signed workspace config pulled by the bridge (BRIDGE.md §5.5). Signed by Portal (iss tb:portal); in standalone the bridge re-mints from the frozen final config (BRIDGE §11). $defs are shared with instance-slice.schema.json. v0.1.11 (C62/C63, BSD-07): `portalKeySet` (root-signed key-set statement; the ONLY trust source, CREDENTIALS §9.5), `portalKeys` informational, `apps[].internalUrl` private-network forms + `ownInfra`.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -104,6 +104,9 @@
     },
     "portalKeys": {
       "$ref": "#/$defs/portalKeys"
+    },
+    "portalKeySet": {
+      "$ref": "#/$defs/portalKeySet"
     },
     "pause": {
       "$ref": "#/$defs/pause"
@@ -302,8 +305,14 @@
     "internalUrl": {
       "type": "string",
       "maxLength": 512,
+      "pattern": "^http://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9-]+)*\\.railway\\.internal:[0-9]{1,5}$",
+      "description": "v0.1.11 (BSD-07): private-network origin of a deployed app instance: `http://<name>.railway.internal:<port>` (no path). Own-infrastructure instances use `ownInfraUrl` with `ownInfra: true` (BRIDGE §5.7)."
+    },
+    "ownInfraUrl": {
+      "type": "string",
+      "maxLength": 512,
       "pattern": "^https?://[^\\s/?#@]+$",
-      "description": "Private-network origin of an app instance (no path)."
+      "description": "v0.1.11 (BSD-07): origin of an own-infrastructure instance (`ownInfra: true`). The bridge routes to it ONLY when the origin is listed in its local env TB_OWN_INFRA_ORIGINS (set by the owner, never by Portal); otherwise it refuses `internal_url_refused` (BRIDGE §5.7)."
     },
     "crudAction": {
       "enum": [
@@ -391,7 +400,12 @@
           "$ref": "#/$defs/digest"
         },
         "internalUrl": {
-          "$ref": "#/$defs/internalUrl"
+          "type": "string",
+          "description": "v0.1.11 (BSD-07): `$defs/internalUrl` (railway.internal form), or `$defs/ownInfraUrl` when `ownInfra` is true (see allOf)."
+        },
+        "ownInfra": {
+          "type": "boolean",
+          "description": "v0.1.11 (BSD-07): the instance runs on the owner's own infrastructure (neighbour, BRIDGE §10.2). Absent = false."
         },
         "entitled": {
           "type": "boolean",
@@ -400,7 +414,35 @@
         "slice": {
           "$ref": "#/$defs/compactJws"
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "ownInfra"
+            ],
+            "properties": {
+              "ownInfra": {
+                "const": true
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "internalUrl": {
+                "$ref": "#/$defs/ownInfraUrl"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "internalUrl": {
+                "$ref": "#/$defs/internalUrl"
+              }
+            }
+          }
+        }
+      ]
     },
     "agentEntry": {
       "type": "object",
@@ -731,7 +773,7 @@
       "type": "array",
       "minItems": 0,
       "maxItems": 8,
-      "description": "CREDENTIALS §5.1. Empty only in the final standalone config.",
+      "description": "CREDENTIALS §5.1. Empty only in the final standalone config. v0.1.11 (C62/C63): INFORMATIONAL — kept (required) for one minor because the frozen v0.1 wire requires it; Core emits it equal to the `keys` of `portalKeySet`; the trust rule ignores it whenever a key-set statement is present or pinned (CREDENTIALS §9.5). Removed in v0.2.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -752,6 +794,12 @@
           }
         }
       }
+    },
+    "portalKeySet": {
+      "type": "string",
+      "maxLength": 8192,
+      "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+      "description": "v0.1.11 (C62/C63): the CURRENT key-set statement, compact JWS `typ: tb-keyset+jws` signed by a Portal Root Key (claims `{iss: tb:portal-root, aud: tb:portal-keys, seq, iat, keys[{jwk, status}]}`, types/credentials.ts KeySetStatementClaims). Verifiers derive the trusted Portal key set ONLY from the newest valid statement (CREDENTIALS §9.5). Optional in v0.1.11 (transition until Core emits it); required in v0.2."
     },
     "pause": {
       "type": "object",

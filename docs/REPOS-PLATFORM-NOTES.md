@@ -26,7 +26,11 @@ Remote `main` of every repo holds one initial commit (README, .gitignore, secret
 
 ## CI standard (template ci-v2) — every lead: adopt it
 - Standard + runner: `opt2-tealbrick-platform/ci/` (read `ci/README.md`). One pipeline: secret-scan, setup (template drift, `tealbrick-ci.json`, package rules, `@opt2-tealbrick/*` URL-dependency check), install, typecheck, lint, unit, conformance, build, kaniko image-check; on `v*` tags image-publish to `ghcr.io/martin-atrin/<image>` + signed release record → release registry; on `<package>-v<ver>` tags a tarball per package on the GitHub release.
-- Current template: `ci-v7` (2026-10-12; `ci/MIN_TEMPLATE` = ci-v7, setup fails below it; daily template-audit names laggards). Re-adopt: `cd opt2-tealbrick-platform && git pull && node ci/tb-ci.ts adopt ../opt2-tealbrick-<name> --kind <kind>` (keeps tealbrick-ci.json formatting). pnpm repos ALSO run `node ci/tb-ci.ts pin-tarballs ../opt2-tealbrick-<name>` and commit `tealbrick-integrity.json` (S3: pnpm does not record integrity for GitHub-release tarballs); npm lockfiles need nothing. Release signing is no longer in product pipelines (SEC-03): `v*` tags attach `release-candidate.json`, the platform signer verifies + signs.
+- Current template: `ci-v8` (2026-10-12, C62/BSD-10). `ci/MIN_TEMPLATE` is still ci-v7 — it will be raised to ci-v8 only after the Coordinator's GO. Re-adopt: `cd opt2-tealbrick-platform && git pull && node ci/tb-ci.ts adopt ../opt2-tealbrick-<name> --kind <kind>` and, for ci-v8, ALSO:
+  1. `"packageManager": "pnpm@9.15.4+sha512.<hex>"` (`corepack use pnpm@9.15.4` writes it);
+  2. `node ci/tb-ci.ts pin-tarballs ../opt2-tealbrick-<name>` (writes integrity into pnpm-lock.yaml; delete tealbrick-integrity.json);
+  3. every Dockerfile `RUN pnpm install --frozen-lockfile --ignore-scripts` / `RUN npm ci --ignore-scripts` (no `npm install` in image builds: give companion layers their own package.json + package-lock.json).
+  Release steps changed: images build to tarballs without credentials and crane pushes them; release-record no longer needs a token; the platform signer finds `v*` tags itself.
 - Adopted on main (2026-10-11 ~19:45): specs, sdk, qa, packages, platform, bridge, connect. NOT yet: knowledge, portal-core, portal-gui, website, tbd.
 - Woodpecker is LIVE for all 12 repos (2026-10-11 ~20:20): every push to main and every PR runs the pipeline. Fork PRs need approval.
 - Lead to adopt (repo already has lead commits; Platform did not touch it): knowledge, connect, bridge, portal-core, portal-gui, website, tbd. Command:

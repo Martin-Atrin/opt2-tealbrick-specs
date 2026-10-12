@@ -68,6 +68,8 @@ export type BridgeErrorCode =
   | "grant_invalid"
   | "grant_expired"
   | "grant_revoked"
+  /** v0.1.11 (C70): companion grant minted under an older slice/config revision than the one the bridge holds; the SDK re-reads its slice and retries once */
+  | "grant_stale"
   | "crud_exceeds_grant"
   | "audience_not_agent"
   | "scope_type_unknown"
@@ -93,7 +95,9 @@ export type BridgeErrorCode =
   | "manifest_mismatch"
   | "key_not_declared"
   | "key_not_set"
-  | "tool_name_too_long";
+  | "tool_name_too_long"
+  /** v0.1.11 (BSD-07): an app / neighbour `internalUrl` outside the private-network forms (BRIDGE §5.7); the app is not routed */
+  | "internal_url_refused";
 
 /** One envelope everywhere. App-side codes (e.g. `scope_denied`, `idempotency_conflict`) pass through, hence `string`. */
 export interface ErrorEnvelope<C extends string = BridgeErrorCode | (string & {})> {
@@ -130,7 +134,13 @@ export interface AppEntry {
   version: SemVer;
   sdkMajor: number;
   manifestDigest: Sha256Digest;
+  /**
+   * v0.1.11 (BSD-07): `http://<name>.railway.internal:<port>`, or — only with `ownInfra: true` — any http(s) origin,
+   * which the bridge routes to ONLY when it is listed in its local `TB_OWN_INFRA_ORIGINS` (BRIDGE §5.7).
+   */
   internalUrl: InternalUrl;
+  /** v0.1.11 (BSD-07): the instance runs on the owner's own infrastructure (neighbour, BRIDGE §10.2). Absent = false. */
+  ownInfra?: boolean;
   /** Informational (status/display). Enforcement is absent grants/hooks/tickets; the bridge never decides on it. */
   entitled: boolean;
   /** Portal-signed instance slice (`tb-slice+jws`) relayed to the app. */
@@ -210,8 +220,10 @@ export interface EnrolRequest {
 export interface EnrolResponse {
   bridgeId: BridgeId;
   workspaceId: WorkspaceId;
-  /** bootstrap trust set, pinned (CORE §4) */
+  /** bootstrap trust set (CORE §4). v0.1.11: informational when `portalKeySet` is present (CREDENTIALS §9.5). */
   portalKeys: PortalKeyEntry[];
+  /** v0.1.11 (C62/C63): current root-signed key-set statement; the bridge verifies it against its build-pinned roots and refuses enrolment if it fails. */
+  portalKeySet?: CompactJws;
   configPath: string;
   ackPath: string;
   waitMaxS: number;

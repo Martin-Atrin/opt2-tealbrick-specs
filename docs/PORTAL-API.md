@@ -396,3 +396,9 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 
 ## v0.1.10 addition (C59)
 - `tickets.keys` answers `url = <TB_KEYS_PUBLIC_URL>/keys` — the bridge's second public domain, key page only (BRIDGE §3.1, §9.3); the GUI form-POSTs the ticket there. Ticket claims unchanged (`aud` = `tb:brg:<id>`). `bridge.deploy` adds that second domain to the bridge service and sets `TB_KEYS_PUBLIC_URL=https://<domain>`; the bridge release `runtime` record lists the env with `source: public-url`.
+
+## v0.1.11 addition (C69c)
+- `SettingFieldView.mutable?: boolean` — Core copies the manifest field `mutable` (default true); `false` means fixed at install: the GUI shows it read-only after deploy and `instances.update {settings}` must refuse a change to it (`validation_failed`).
+
+## v0.1.11 addition (C71)
+- The release index body is spec: `ReleaseIndexBody` / `ReleaseIndexEntry` / `ReleaseSourceRecord` / `BridgeRuntimeRecord` in types/routes.ts. Dev source records carry optional `context` (repo-relative build root, default "."; for apps it MUST equal the manifest `runtime.build` root); Core builds with Railway rootDirectory = `context`. Platform's registry README stays the operational guide; on a conflict the types win.

@@ -30,9 +30,11 @@ import type {
   GrantClaims,
   InstanceId,
   InstanceRef,
+  KeySetStatementClaims,
   PersonId,
   PersonTicketLaunchClaims,
   PortalRef,
+  PortalRootChannel,
   Sha256Digest,
   SliceClaims,
   Typ,
@@ -80,8 +82,9 @@ export declare function validateManifest(json: unknown): ManifestValidation;
 export declare function manifestDigest(manifest: Manifest): Sha256Digest;
 /** MANIFEST §13: companion declarations checked against the target manifests (Core, conformance). */
 export declare function validateCompanions(manifest: Manifest, targets: readonly Manifest[]): ManifestValidation;
-/** MANIFEST §13 (CI and CLI only; the one function here that reads files): skill files, frontmatter, variables. */
-export declare function validateAppFiles(manifest: Manifest, repoDir: string): Promise<ManifestValidation>;
+/** MANIFEST §13 (CI and CLI only; the one function here that reads files): skill files, frontmatter, variables.
+ * v0.1.11 (C70, MANIFEST §3): build paths resolve from `repoDir`, skill/app files from `manifestDir` (default `repoDir`). */
+export declare function validateAppFiles(manifest: Manifest, repoDir: string, manifestDir?: string): Promise<ManifestValidation>;
 
 /** Standard op ids, derived from manifest.ts STANDARD_OPERATIONS (the one declaration). */
 export type StandardOpId = StandardOperationId;
@@ -121,6 +124,33 @@ export interface KeySet {
 export declare function keySetFrom(jwks: { keys: Ed25519PublicJwk[] }, issuer: PortalRef | BridgeRef | InstanceRef): KeySet;
 /** Adds keys only if `announcedBy` was verified with a key already in `trusted` (CORE §4). */
 export declare function keySetAnnounce(trusted: KeySet, announced: KeySet, announcedBy: { kid: string }): KeySet;
+
+// ── v0.1.11 (C62/C63): Portal Root Keys + key-set statements (CORE §4, CREDENTIALS §9.5). `keySetAnnounce` is no
+// longer a trust path: it stays exported (deprecated) for one minor and no verifier may use it.
+/** Build-pinned root PUBLIC keys of `channel` (= PORTAL_ROOT_KEYS[channel]). The channel is a build constant, never env. */
+export declare function portalRootKeys(channel: PortalRootChannel): Ed25519PublicJwk[];
+/** The pinned statement (bridge sealed S1, app store): its `seq` and the compact JWS verbatim. */
+export interface PinnedKeySet { seq: number; kss: string }
+/** `keys`: every key of the statement (pending | active | retired: grants, tickets, pairing codes);
+ * `signers`: only active | pending keys (the ONLY keys a config or slice may be signed with). */
+export interface VerifiedKeySet { ok: true; keys: KeySet; signers: KeySet; seq: number; kss: string }
+/** Offline ceremony tool only (CREDENTIALS §9.5): checks the closed claim set, signs `tb-keyset+jws` with a root key. */
+export declare function signKeySetStatement(claims: KeySetStatementClaims, rootKey: Ed25519KeyPair | ExternalSigner): Promise<string>;
+/** Root-signed (header kid ∈ roots), closed claims, well-formed keys, `seq` > pinned.seq (equal seq: byte-identical). Refusal codes: KEYSET_REFUSAL. */
+export declare function verifyKeySetStatement(jws: string, roots: readonly Ed25519PublicJwk[], pinned?: PinnedKeySet | null): VerifiedKeySet | Refusal;
+/**
+ * The ONE trust rule for a config / slice body (CREDENTIALS §9.5, transition rule included): body carries
+ * `portalKeySet` → verifyKeySetStatement (`changed` = newer than pinned); no `portalKeySet` and a pin exists →
+ * `keyset_missing`; no `portalKeySet` and no pin, or a build without pinned roots and no pin → `{ ok: true, legacy: true }`
+ * (the caller keeps its pre-v0.1.11 key set and logs a warning).
+ */
+export declare function trustedPortalKeys(
+  body: { portalKeySet?: string },
+  pinned: PinnedKeySet | null,
+  roots: readonly Ed25519PublicJwk[],
+): (VerifiedKeySet & { legacy: false; changed: boolean }) | { ok: true; legacy: true; reason: string } | Refusal;
+/** BSD-07 (BRIDGE §5.7): `http://<name>.railway.internal:<port>`, or (ownInfra only) an http(s) origin listed in `allowList` (bridge env TB_OWN_INFRA_ORIGINS). */
+export declare function isPrivateInternalUrl(url: string, opts?: { ownInfra?: boolean; allowList?: readonly string[] }): boolean;
 
 export interface JwsExpect {
   typ: Typ;
@@ -445,7 +475,12 @@ export interface App {
 export declare function defineApp<A extends string = never>(def: AppDefinition<A>): App;
 
 /** Reads only the TB_* names of SdkEnv; refuses to boot on an invalid manifest, handler set or migration set. */
-export declare function startApp(app: App, env: Record<string, string | undefined>): Promise<RunningApp>;
+export declare function startApp(app: App, env: Record<string, string | undefined>, hooks?: StartHooks): Promise<RunningApp>;
+/**
+ * v0.1.11 (C63): TEST HARNESS hooks (conformance start modules, unit tests). Never read from env, never set by Portal.
+ * `portalRootKeys` replaces the build-pinned roots so a harness can sign key-set statements with a test root pair.
+ */
+export interface StartHooks { portalRootKeys?: Ed25519PublicJwk[] }
 export interface RunningApp {
   readonly status: () => HealthStatus;
   readonly receipts: ReceiptStore;

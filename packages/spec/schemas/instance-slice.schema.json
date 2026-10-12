@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://spec.opt2.tealbrick.com/instance-slice.schema.json",
   "title": "Instance slice payload (tb-slice+jws)",
-  "description": "v0.1. JWS payload of the per-instance slice: signed by Portal (or the standalone issuer), carried inside the workspace config, relayed to the app by the bridge via POST /tb/v1/status (BRIDGE.md §10.4).",
+  "description": "v0.1. JWS payload of the per-instance slice: signed by Portal (or the standalone issuer), carried inside the workspace config, relayed to the app by the bridge via POST /tb/v1/status (BRIDGE.md §10.4). v0.1.11 (C62/C63): `portalKeySet` (root-signed key-set statement; apps verify slices against it, CREDENTIALS §9.5), `portalKeys` informational.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -71,6 +71,9 @@
     },
     "portalKeys": {
       "$ref": "workspace-config.schema.json#/$defs/portalKeys"
+    },
+    "portalKeySet": {
+      "$ref": "workspace-config.schema.json#/$defs/portalKeySet"
     },
     "bridge": {
       "type": "object",

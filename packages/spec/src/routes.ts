@@ -396,6 +396,8 @@ export interface SettingFieldView {
   required: boolean;
   default: SettingValue | null;
   choices: { value: string; label: string }[] | null;
+  /** v0.1.11 (C69c): manifest `mutable` (default true); `false` = fixed at install, the GUI renders it read-only after deploy. */
+  mutable?: boolean;
 }
 /** Requirement only. A value field does not exist anywhere in this registry.
  *  GUI label for source `account_default` = "workspace default keys" (N13: they live in each workspace's bridge). */
@@ -467,6 +469,62 @@ export interface Release {
   artifact: { url: string; sha256: string } | null;
   upgradeFrom: string;
   publishedAt: IsoTime;
+}
+/**
+ * v0.1.11 (C71): wire of the signed release index body (`opt2.release-index/v2`, published by Platform, read by Core's
+ * release sync; signature = ReleaseIndexClaims in types/credentials.ts). Exactly one of `image` | `source` | `artifact`.
+ */
+export interface ReleaseSourceRecord {
+  /** `opt2-tealbrick-<x>` (GitHub repo under the opt2 owner) */
+  repo: string;
+  /** commit sha the build uses */
+  ref: string;
+  /** repo-relative Dockerfile path */
+  dockerfile: string;
+  /** repo-relative build root (default "."); for apps it MUST equal the manifest `runtime.build` root; Core builds with Railway rootDirectory = context */
+  context?: string;
+}
+export interface BridgeRuntimeRecord {
+  port: number;
+  internalPort: number;
+  healthPath: string;
+  readyPath: string;
+  volumes: { mountPath: string; backup: boolean }[];
+  env: { name: string; source: "portal" | "provider-secret" | "public-url" | "public-url-keys" | "fixed"; value?: string }[];
+}
+export interface ReleaseIndexEntry {
+  id: ReleaseId;
+  product: ProductId;
+  kind: "app" | "bridge" | "desktop";
+  version: string;
+  channel: "stable" | "dev";
+  manifestDigest: Digest | null;
+  manifestUrl: string | null;
+  skillsDigest: Digest | null;
+  /** stable releases always carry an image pinned by digest */
+  image: string | null;
+  /** dev channel only (C29) */
+  source: ReleaseSourceRecord | null;
+  /** desktop only */
+  artifact: { url: string; sha256: string } | null;
+  /** apps with companion services built as images: one image per service */
+  services: { id: string; image: string }[] | null;
+  /** kind bridge only */
+  runtime: BridgeRuntimeRecord | null;
+  minOs: string | null;
+  notarized: boolean | null;
+  upgradeFrom: string;
+  repo: string;
+  commit: string;
+  tag: string | null;
+  publishedAt: IsoTime;
+}
+export interface ReleaseIndexBody {
+  schema: "opt2.release-index/v2";
+  generatedAt: IsoTime;
+  releases: ReleaseIndexEntry[];
+  harnesses: HarnessOption[];
+  offers: unknown[];
 }
 export interface ReleaseListInput { product: ProductId; channel?: "stable" | "dev" }
 export interface ReleaseList { items: Release[] }

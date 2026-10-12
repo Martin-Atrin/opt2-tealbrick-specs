@@ -51,6 +51,8 @@ export const TYP = {
   ownerAssertion: "tb-owner-assert+jwt",
   /** v0.1.1 (C30): signed release index (Platform). A signed DOCUMENT digest, not a credential kind. */
   releaseIndex: "tb-release-index+jws",
+  /** v0.1.11 (C62/C63): Portal key-set statement, signed by a Portal Root Key (CREDENTIALS §9.5). A signed DOCUMENT, not a credential kind. */
+  keySet: "tb-keyset+jws",
 } as const;
 export type Typ = (typeof TYP)[keyof typeof TYP];
 
@@ -188,7 +190,14 @@ export interface StandaloneState {
 }
 /** Credential section of the config body (field names fixed by CREDENTIALS §5.1). */
 export interface ConfigCredentialSection {
+  /**
+   * v0.1.11 (C62/C63): INFORMATIONAL only. Kept (required) for one minor because the frozen v0.1 wire requires it;
+   * Core emits it equal to the `keys` of `portalKeySet`. The trust rule (CREDENTIALS §9.5) ignores it whenever a
+   * key-set statement is present or pinned. Removed in v0.2.
+   */
   portalKeys: PortalKeyEntry[];
+  /** v0.1.11 (C62/C63): the CURRENT root-signed key-set statement (`tb-keyset+jws`, compact JWS). The ONLY source of trusted Portal keys (CREDENTIALS §9.5). */
+  portalKeySet?: string;
   connections: ConnectionEntry[];
   instanceKeys: InstanceKeyEntry[];
   pause: PauseState;
@@ -199,7 +208,10 @@ export interface ConfigCredentialSection {
 }
 /** Credential section of the slice body. */
 export interface SliceCredentialSection {
+  /** v0.1.11 (C62/C63): INFORMATIONAL only (see ConfigCredentialSection.portalKeys). */
   portalKeys: PortalKeyEntry[];
+  /** v0.1.11 (C62/C63): the CURRENT root-signed key-set statement (`tb-keyset+jws`); apps derive trusted Portal keys only from it (CREDENTIALS §9.5). */
+  portalKeySet?: string;
   /** v0.1.10 (C64): `publicUrl` = bridge public origin (apps build `/p/<product>` callback URLs from it) */
   bridge: { id: BridgeId; keys: Ed25519PublicJwk[]; publicUrl?: string };
   pause: PauseState;
@@ -546,3 +558,50 @@ export interface ReleaseIndexClaims {
   releases: number;
   offers: number;
 }
+
+// ── v0.1.11 (C62/C63): Portal Root Keys and the key-set statement (CORE §4, CREDENTIALS §9.5) ──
+/** Issuer of key-set statements: the offline Portal Root Keys. Not a credential kind: a trust anchor. */
+export type PortalRootRef = "tb:portal-root";
+/** Audience of key-set statements: every verifier of Portal-signed documents. */
+export type PortalKeysAudience = "tb:portal-keys";
+
+/**
+ * Claims of a key-set statement (`typ: tb-keyset+jws`, header `kid` = RFC 7638 thumbprint of the signing root key).
+ * Closed set. No `exp`, `sub` or `jti`: a statement is superseded only by a higher `seq`.
+ * `keys`: 1..8 entries, distinct thumbprints, exactly one `active`; `jwk` = Ed25519 public JWK (`kid`, if present, = its thumbprint).
+ */
+export interface KeySetStatementClaims {
+  iss: PortalRootRef;
+  aud: PortalKeysAudience;
+  /** monotonic, ≥ 1; +1 per ceremony */
+  seq: number;
+  /** epoch seconds (informational; ordering is `seq`) */
+  iat: number;
+  keys: PortalKeyEntry[];
+}
+
+/** Refusal codes of the key-set rule (bridge status `rejected[].code`, SDK slice refusal). */
+export const KEYSET_REFUSAL = {
+  /** bad JWS, unknown root, bad signature, claims not the closed set, malformed keys */
+  invalid: "keyset_invalid",
+  /** `seq` below the pinned `seq`, or equal `seq` with a different statement */
+  rollback: "keyset_rollback",
+  /** a document without `portalKeySet` after a statement was pinned */
+  missing: "keyset_missing",
+} as const;
+
+/** Root set a build pins: dev-channel builds pin `dev`, stable builds pin only `prod` (C63). Selected at build time, never by env. */
+export type PortalRootChannel = "dev" | "prod";
+
+/**
+ * v0.1.11 (C63): pinned Portal Root Key PUBLIC JWKs (release data; a root change = new spec + bridge/SDK release).
+ * `dev`: the dev root pair Platform generated locally (registry/portal-root-keys.dev.json, Platform e19cf98;
+ * root-a, root-b). `prod`: empty until the cutover ceremony (air-gapped, CREDENTIALS §9.5).
+ */
+export const PORTAL_ROOT_KEYS: { dev: Ed25519PublicJwk[]; prod: Ed25519PublicJwk[] } = {
+  dev: [
+    { kty: "OKP", crv: "Ed25519", x: "IIKwS6eT-LIrtVuNO-2VRoGdYk27nBkG8zG_Ed1dt8Q", kid: "xr8nlOuIDP8GqJOnDvBe6dIc2jwy2T83j2YqlPz6x7A" },
+    { kty: "OKP", crv: "Ed25519", x: "d-u0BND48bU6DR38KF4GgHh5hatvEUrIS3WccrmiPIs", kid: "17Gm_IqxFTy4zBA_VgpcCQYN53_Pfh-gLVidSiyJTKg" },
+  ],
+  prod: [],
+};
