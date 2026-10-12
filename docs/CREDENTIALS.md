@@ -304,4 +304,7 @@ None. (Key connections without a refresh token: accepted, C15.)
 - Rule (c) of §9.5 is removed: Core emits `portalKeySet` since 2026-10-12T10:19:19Z. Every build that pins Portal Root Keys for its channel refuses a statement-less enrolment response, config or slice, including the first one. `portal.signing_keys` (PORTAL-API) publishes Core's public key ring for the ceremony and is never a trust input.
 
 ## v0.1.13 addition (G1)
-- Call proof (op) gains the optional claim `hv: {f, r, by}` (closed set extended; `HoldVerdictClaim`): `f` ∈ HOOK_HOLD_FAMILIES, `r` 1..280 chars, `by` = `<product>/<hookId>` (≤ 72 chars). Verifiers (app SDK) refuse a proof with a malformed `hv` (`call_proof_invalid`). Signed by the bridge like the rest of the proof: the agent cannot add, change or remove it.
+- Call proof (op) gains the optional claim `hv: {f, r, by}` (closed set extended; `HoldVerdictClaim`): `f` ∈ HOOK_HOLD_FAMILIES, `r` 1..280 chars, `by` = `<productId>/<hookId>` (both by the manifest id patterns). Verifiers (app SDK) refuse a proof with a malformed `hv` (`call_proof_invalid`). Signed by the bridge like the rest of the proof: the agent cannot add, change or remove it.
+
+## v0.1.14 addition (C91)
+- Bridge-op proof (`bop` variant): claim set per `bop` is fixed — catalog `{bop, op}`, resolve `{bop, op, in}`, mark `{bop, in}`, scope_summary `{bop}` (SDK-API v0.1.14).

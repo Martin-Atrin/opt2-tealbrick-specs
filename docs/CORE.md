@@ -2,6 +2,15 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.13 → v0.1.14 (additive; C90, C91, C96, C98, C100, C102, A2A-10/11, L3, Kanban S2, Connect Q-C2, Fleet)
+- Slice `companionTargets` (C90) and `companionCallers` (C102); SDK `ctx.companionTargets()`, `Caller.name` for app callers.
+- C91 bridge-op binding rule normative (`bridgeOpBinding` / `bridgeOpProofClaims`, manifest 0.1.8).
+- C98 derived idempotency key (`deriveIdempotencyKey`, manifest 0.1.9); `B8.idempotency_derived`.
+- A2A-10 unknown `parentCall` → app-initiated. A2A-11 `Edge.grantState: blocked` + reasons, `Instance.companionIssues`. C100 `Instance.updateCompanionChanges`.
+- StatusReport `connectionsSeen`, `rejected` kind `bridge_op`, `toolsOmitted` code `catalog_failed` (L3). Core `Health.deployWorker`.
+- C96 device request `agents[].name/purpose`; CLI harness option row (data).
+- Catalog `hasUi` / `launchPath` (Fleet). `defaultGrants[].callers` (Connect Q-C2). Shared scope defaults reach callers seen before (Kanban S2). `tb.hold_status` family + reason (reason text only, C90).
+
 ## Changelog v0.1.12 → v0.1.13 (wave 2a spine extensions: C81 G1/G4/G4b/G5, C82, C85, C86; Fleet/Inbox requests)
 - **G1 hold from a gate:** a before hook may answer `{allow: false, hold: {family, reason}}` (`family` ∈ HOOK_HOLD_FAMILIES = HOLD_FAMILIES + `policy`). Bridge precedence: any refuse wins; else the FIRST hold is kept and the chain continues; the call is forwarded with the verdict in the op call proof claim `hv {f, r, by}`; the TARGET app's `authorize()` holds (receipt `heldBy`). An approval runs the same input once; the bridge re-runs the before chain on the retry and a refuse still wins (C82). BRIDGE §8.1 v0.1.13, CREDENTIALS §10, SDK-API §4.
 - **G4 cross-app holds list:** standard op `tb.holds_pending` (agent audience, read; summaries only). Wildcard companion `product: "*"` ONLY for `tb.holds_pending`/read (M-CP-3); Core mints the per-app grants only after the owner's explicit consent (`instances.consent`, kind `holds_pending_all`, GUI text "This app can see the pending approvals of all apps"), revocable (C82).

@@ -533,3 +533,82 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - Interim (needs Coordinator waiver, like C55): Fleet's conformance script adds `--allow-not-run` until 0.1.9, then removes it.
 
 ## specs: DONE (2026-10-12) — 0.1.12 bundle released: spec 0.1.12, manifest 0.1.7 (cron helper), miniapp-sdk 0.1.12 (claim guard + reclaim, spine S1), conformance 0.1.8 (Fleet read-only hold chain n/a + P1 without caps; Bridge one-pass --test-roots fixtures: rotation re-signs the statement, standalone doc carries it), create-tealbrick-miniapp 0.1.6. Queued for conformance 0.1.9 (with spec 0.1.13): A5 free-text tamper field (Inbox), A4.mark_after_failed n/a + per-check waivers with expiry (Fleet).
+
+## specs → portal-core (C90, spec 0.1.14): slice `companionTargets`
+- Every instance slice carries `companionTargets: [{product, ins}]` = exactly the targets of the companion grants in that slice (wildcard-derived included). Revoking the `holds_pending_all` consent removes the wildcard-derived entries in the next slice. Types: spec 0.1.14 `InstanceSlice.companionTargets` (types/bridge.ts in coordination/specs today). SDK reads it as `ctx.companionTargets()`.
+
+## qa: S1 — bridge-op `catalog` proof binding differs between bridge and SDK → every dynamic tool search fails (live, 2026-10-12 ~13:35Z)
+- Live: agent QA fleet 01 (Gmail "doppel" at READ, Connect 0.3.2, bridge 0.1.12): `connect__tools_search {query:"gmail list messages"}` → `app_error "bridge op catalog answered 401"`. Bridge log also shows `bridge.catalog.failed … dynamic_resolve_failed` for Knowledge's `engine` op. Effect: no dynamic tool (Composio Gmail, MCP connectors, Knowledge engine tools) can be found or called → J1-32..34 blocked.
+- Cause (code): bridge `calls.ts:149-166` signs EVERY bridge-op proof with `in = digest(body)` (catalog body = `{op, query, limit}`); miniapp-sdk `bridge-routes.ts:118-121` verifies `catalog` with bind `{bop, op}` only (comment: "SPEC-GAP: CREDENTIALS §10 describes `in` generically; the catalog row of SDK-API §3.2 lists only `op`"). The proof's `in` is therefore unexpected/unbound → `call_proof_invalid` 401.
+- Ask: Specs decides ONE rule (recommend: `in` = digest(body) for every bop, the SDK binds it for catalog too, since the query is input); SDK + bridge align; CONFORMANCE adds a live bridge→app catalog search case (B13 currently passes with the fake bridge only).
+
+## specs: DECIDED (C91) — bridge-op proof binding: catalog {bop, op} (no `in`), resolve {bop, op, in}, mark {bop, in}, scope_summary {bop}; ONE implementation `bridgeOpBinding` / `bridgeOpProofClaims` in @opt2-tealbrick/manifest 0.1.8 (bridge signs with bridgeOpProofClaims — Bridge 0.1.15 please import it rather than re-implement). SDK side was already correct (it binds catalog without `in`, resolve/mark with `in`) and now calls the shared function; conformance's fake app was the drift (bound `in` for every bop) → fixed + new `real_app` group with a real SDK app (B25.*) in conformance 0.1.9. Deployed SDK 0.1.12 apps work as soon as the bridge stops sending `in` for catalog: no app redeploy needed.
+
+## bridge → specs/conformance (C91, 2026-10-12): fake app's bridge-op binding contradicts the real SDK
+- conformance 0.1.8 `fake-app.js:210` verifies every bridge-op proof with `{bop, op?, inputDigest: digest(body)}`. miniapp-sdk (`bridge-routes.ts:118`) binds exactly: catalog `{bop, op}`, resolve `{bop, op, in}`, mark `{bop, in}`, scope_summary `{bop}` — now the C91 rule.
+- Effect: the suite passed a bridge that the real SDK refuses (S1 on qa1: catalog 401; scope_summary silently 401 too). Bridge 0.1.15 follows C91, so 0.1.8 fails B7.dynamic_list, B16.catalog_omitted_reported, B16.search_uses_catalog, B16.dynamic_entry_call, B13.scope_summary.
+- Ask for 0.1.9: the fake app uses the SDK's exact binding (best: import the SDK's own bind table, one source), and the bridge target adds a check that runs bridge ops against a REAL miniapp-sdk app (the bridge repo has one: packages/bridge/test/c91-live.test.ts).
+- Note: under C91 the catalog search query (body `{op, query, limit}`) is not bound in the proof (bop + op are; 60 s, replay-guarded; read-only result). Keep as decided unless Specs wants `in` for search too — then SDK and bridge change together.
+
+## portal-core → specs: `Health.deployWorker` (system.health, internal route)
+- Core 542d51a returns, in addition to `{ok, version, db}`: `deployWorker {alive: boolean (sweep ran < 90 s ago), lastSweepAt: IsoTime|null, active: int (jobs running in this process), queued: int (instances queued/deploying/removing), unowned: int (in flight but no live lease), resumed: int (jobs this process resumed since boot)}`. Please add it to the `Health` type (additive, optional). `ok` still means "db reachable" so platform health checks do not flap on a slow sweep.
+
+## specs: DECIDED — `Health.deployWorker` (optional `DeployWorkerHealth`) lands in spec 0.1.14 (types/routes.ts, PORTAL-API v0.1.14).
+
+## bridge → specs (L3, 2026-10-12): bridge-op failures need a status signal, not only a log line
+- Today two bridge-op failures are warn-log only: `catalog` failing makes a list-mode dynamic op contribute ZERO tools (agent sees nothing, owner sees nothing), and `scope_summary` failing drops the per-agent scope labels. That is exactly how C91 stayed hidden (LEARNINGS L3).
+- StatusReport has no slot: `rejected[].kind` is config|grant|slice|assertion|ticket|pairing|claim; `toolsOmitted[].code` is tool_name_too_long|name_collision|ceiling.
+- Ask (spec 0.1.14, additive): `rejected[].kind` += `"bridge_op"` with codes `catalog_failed` / `scope_summary_failed` / `resolve_failed` (+ the app's HTTP status in `detail`), and `toolsOmitted[].code` += `"catalog_failed"` (name = the dynamic op id) so Core can show "tools of <app> unavailable" on the canvas and raise a GlitchTip alert.
+- Bridge side ready to emit both in the next bridge release once typed.
+
+## specs: DECIDED (spec 0.1.14, L3) — StatusReport `rejected` kind `bridge_op`; `toolsOmitted` code `catalog_failed` (types/bridge.ts, BRIDGE v0.1.14). Core: show them like the other rejected/omitted entries.
+
+## portal-gui → specs/core (C96, F11): device request carries the card name and purpose the CLI suggests
+- Need (additive, optional, display-only): `DeviceRequest.agents[].name?: string` (max 64) and `purpose?: string` (max 500), set from `DeviceStartAgentInput.agents[].name?/purpose?` (the `agents.json` entry). The approval page prefills "Card name" and "What it is for" from them and the owner can edit both before Approve.
+- GUI 0.x already reads both defensively (absent = generated name "<client> on <machine>", empty purpose), so Core/CLI can ship in any order. Unknown `harness` ids no longer fail: the GUI creates the card with the registry option `generic-mcp` ("Other agent (MCP)") and says so.
+
+## portal-core → specs (C96): suggested card name in the agent device flow
+- Core 3230e69 accepts `DeviceStartAgentInput.agents[].name?: string` (1..60 chars; control/bidi characters stripped) and returns it as `DeviceRequest.agents[].name?: string` so the device page names a new card in one step. Please add both optional fields to the types (additive). The CLI can send it from `--name` / the agents file `name`.
+- Also: `DeviceRequest.harness` is now always a harness OPTION id that exists (Core maps the CLI's own names, e.g. `tealbrick_cli` → `tealbrick-cli`, `generic` → `generic-mcp`; else the client's default), or null. The doc comment "harness option id" now holds for what Core returns.
+
+## portal-core → bridge/CLI (C96): send a harness option id and the card name
+- `tealbrick agent login` defaults `--harness` to `tealbrick_cli` (not an option id). Core maps it, but please default to `tealbrick-cli` (registry option since platform c23c50b) and pass `name` per agent slot (`--name`, agents file `name`).
+
+## portal-core → specs (C100): companion changes of an update, shown before Confirm
+- Core (live after this push) adds to `Instance`, whenever `updateAvailable` is set: `updateCompanionChanges: CompanionChange[]` (empty = no change). `CompanionChange { target: ProductId | "*"; change: "added" | "removed" | "changed"; operations: { added: string[]; removed: string[] }; crud: { added: CrudAction[]; removed: CrudAction[] }; widens: boolean }` — from the release the instance runs to `updateAvailable`. Please type it (additive, optional).
+- GUI (C100): before Confirm on an update, for each entry with `widens`, show "This update lets <app> also <crud added> in <target>" (and removed access as plain text). The owner's confirm is the consent (no separate consent kind).
+- Optional later: `instances.update` `dryRun: true` returning the same list for an explicitly chosen `releaseId` (today the list covers `updateAvailable` only).
+
+## connect → specs/SDK (Q-C2, Coordinator-approved 2026-10-12): defaultGrants filtered by caller type
+- Connect 0.4.0 (C86) lets companion APPS send from the owner-picked chat bot through a shared `account` scope instance `sender:<service>` and manifest `defaultGrants: [{kind: "shared", access: "read_update"}]`. The shared default also gives every AGENT a row on `sender:*`; Connect refuses agents in the handler (`sender_reserved_for_apps`, tested).
+- Ask (additive): `defaultGrants[].callers?: ("agent" | "app")[]` (default both). `applyDefaultsFor` / `shareWithSeen` apply a grant only to the listed caller types. Connect then declares `callers: ["app"]` and can drop the handler-only guard.
+- Interim (A2A-12): the shared default grants a separate level `apps_only` ("APPS ONLY (not usable by agents)"), Connect's access UI never offers it, and the scope summary counts only `read` / `read_update` / `read_update_delete`, so `sender:*` rows do not show in the canvas summary. With the filter, Connect returns to `{count} {labelPlural}`.
+
+## bridge → specs/conformance (C98, 2026-10-12): B8.idempotency_required predates C98
+- conformance 0.1.9 `B8.idempotency_required` asserts the bridge REFUSES a `required`-idempotency tools/call without `_meta["tealbrick/idempotencyKey"]`. C98: the bridge derives the key (digest of connection, MCP session, op, canonical input, 10-minute bucket) so model-driven clients can write.
+- Ask (0.1.10): B8 becomes — a write without `_meta` succeeds once; an identical retry in the same session/window returns the same result with ONE app call; a client key keeps exact semantics. Bridge 0.1.16 has a real-SDK-app test for exactly this (packages/bridge/test/c98.test.ts).
+
+## portal-core → specs + portal-gui (A2A-11): companion edges with a blocked state and reason
+- Core (live after this push): `Edge.grantState` gains `"blocked"` (an app→app edge whose companion declaration fails M-CP-2 against the target's CURRENT release), and app→app edges carry `blockedReason?: "companion_op_missing" | "target_not_deployed"` + `blockedDetail?: string` (≤ 200 chars, plain text). A declared companion now has its edge also before the target is deployed (`grantState: "not_deployed"`, `blockedReason: "target_not_deployed"`). `Instance.companionIssues?: { target, edge, state, reason, detail }[]` lists the app's companion connections that do not work now. Please add `"blocked"` to the `grantState` enum and type the new optional fields.
+- GUI: draw such edges as blocked (not active) with the detail as the reason; an app→app edge may point at a product with no node yet (target not deployed) — show it as a pending target. No owner action is needed: the grant returns by itself in the next config once the target runs / offers the op again.
+
+## kanban: verified display name for inbound app callers (QA S3, Kanban 0.1.4)
+- Need: an app that receives companion calls (Kanban from Evolution/Observer) must show WHO called by the app's display name; SDK 0.1.13 sets `Caller.name` = the instance id for app callers, and nothing verified names the calling product (grant: sub tb:ins + wf; call proof: no product; slice `companionTargets` = own outbound targets only).
+- Ask (spec 0.1.14 candidate): `InstanceSlice.companionCallers: [{product, ins, name}]` = the instances holding companion grants that target this instance (Core minted them); the SDK sets `Caller.name` for app callers from it (fallback: instance id). No app code change needed in Kanban.
+
+## fleet → portal-core + portal-gui (QA S3, 2026-10-12): Open needs `ui.configurePath`, but MANIFEST §12 makes it optional
+- Core catalog (src/registries/catalog.ts:194) sets `hasConfigureUi: !!m.ui?.configurePath`; the GUI open-blocker (screens/workspace/open-blocker.ts:16) answers "no_ui" without it, so an app with only `ui.launchPath` cannot be opened. MANIFEST §12: "A launch ticket opens `launchPath` (double-click opens `configurePath` if present)".
+- Fleet 0.1.2 declares `configurePath: "/"` as the fix on its side. Ask: Core adds `hasUi: !!m.ui` (or the GUI gates Open on `launchPath`), and `useLauncher` falls back to `launchPath` when there is no configurePath; keep `hasConfigureUi` for the configure affordance only.
+
+## portal-core → specs + bridge: connection activity in StatusReport (`connectionsSeen`)
+- Nothing on the wire tells Core that a connection was used, so `AgentConnection.lastSeenAt` stayed null (QA: Foxy Codex con_01M4RAQB5HM2DF3GZCG2J88326).
+- Proposal: `StatusReport.connectionsSeen?: { con: ConnectionId; lastSeen: IsoTime }[]` — connections that authenticated (agent assertion / pairing session) since the previous report, max 500, latest time per connection. Core f5c0e13 already reads it: forward only, future times clamped to now, unknown or foreign ids ignored, no config change.
+- Bridge: send it in every ack. Spec: add the optional field.
+
+## portal-core → specs (C102): slice `companionCallers`
+- Core f5c0e13 fills `InstanceSlice.companionCallers: { product, ins, name }[]` (the apps holding a companion grant that targets this instance; `name` = the caller manifest name, ≤ 80) together with `companionTargets`, both emitted once the installed slice schema has them (spec 0.1.14).
+
+## portal-core → portal-gui + specs (Fleet: Open for apps without a configure screen)
+- Core (live after this push) adds to `CatalogEntry`: `hasUi: boolean` (the manifest declares `ui`) and `launchPath: string | null` (`ui.launchPath`). `hasConfigureUi`/`configurePath` are unchanged and mean the configure screen only.
+- GUI: enable Open when `hasUi` (not `hasConfigureUi`): src/screens/workspace/open-blocker.ts:16 (`no_ui` only when `!hasUi`), canvas/nodes.tsx:30-31 ("Double-click to open" when `hasUi`), EdgeInspector.tsx:151. `launch.ts:12`: open `path ?? configurePath ?? launchPath` — or simply no path, the bridge's `/a/<product>/tb/launch` lands on the app's launchPath. Keep the configure screen gated on `hasConfigureUi`.
+- Specs: type the two fields on `CatalogEntry` (additive).

@@ -278,7 +278,8 @@
             "required": ["kind", "access"],
             "properties": {
               "kind": { "enum": ["own", "shared", "all"] },
-              "access": { "$ref": "#/$defs/snakeId" }
+              "access": { "$ref": "#/$defs/snakeId" },
+              "callers": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["agent", "app"] } }
             }
           }
         },

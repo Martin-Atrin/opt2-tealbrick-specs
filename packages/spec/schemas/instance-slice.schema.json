@@ -156,6 +156,35 @@
     "standalone": {
       "$ref": "workspace-config.schema.json#/$defs/standaloneBlock"
     },
+    "companionTargets": {
+      "type": "array",
+      "maxItems": 256,
+      "description": "v0.1.14 (C90): the targets this app holds a companion grant for (one per grant).",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product", "ins"],
+        "properties": {
+          "product": { "$ref": "workspace-config.schema.json#/$defs/productId" },
+          "ins": { "$ref": "workspace-config.schema.json#/$defs/insId" }
+        }
+      }
+    },
+    "companionCallers": {
+      "type": "array",
+      "maxItems": 256,
+      "description": "v0.1.14 (C102): the instances holding companion grants that target this instance; name = caller manifest name.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["product", "ins", "name"],
+        "properties": {
+          "product": { "$ref": "workspace-config.schema.json#/$defs/productId" },
+          "ins": { "$ref": "workspace-config.schema.json#/$defs/insId" },
+          "name": { "type": "string", "minLength": 1, "maxLength": 80 }
+        }
+      }
+    },
     "portalUrl": {
       "$ref": "workspace-config.schema.json#/$defs/httpsUrl",
       "description": "v0.1.13 (C86): the Portal GUI origin (no path); apps build owner links `<portalUrl>/w/<ws>/open?product=<p>&path=<path>`."

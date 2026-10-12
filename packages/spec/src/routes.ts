@@ -344,7 +344,8 @@ export interface DeviceStartAgentInput {
   machine_label: string;
   /** harness option id */
   harness: string;
-  agents: { agt?: AgentId; public_key: Jwk }[];
+  /** v0.1.14 (C96): `name` (1..80) / `purpose` (≤ 280) are suggestions from the CLI; the owner may edit them on the device page */
+  agents: { agt?: AgentId; public_key: Jwk; name?: string; purpose?: string }[];
 }
 export type DeviceStartInput = DeviceStartOwnerInput | DeviceStartAgentInput;
 export interface DeviceStart {
@@ -378,13 +379,15 @@ export interface DeviceRequest {
   clientId: DeviceClientId;
   machineLabel: string;
   harness: string | null;
-  agents: { index: number; agt: AgentId | null; publicKeyThumbprint: string }[];
+  /** v0.1.14 (C96): suggested `name` / `purpose` as the client sent them (display + prefill only) */
+  agents: { index: number; agt: AgentId | null; publicKeyThumbprint: string; name?: string; purpose?: string }[];
   state: "pending" | "approved" | "denied" | "expired" | "redeemed";
   createdAt: IsoTime;
   expiresAt: IsoTime;
 }
 /** scope agent: ws + one agent card per pair (by index; existing cards from agents.create). scope owner: neither. */
-export interface DeviceApproveInput { userCode: string; ws?: WorkspaceId; agents?: { index: number; agt: AgentId }[] }
+/** v0.1.14 (C96): `name` / `purpose` = the owner's edits on the device page, applied to that agent card on approve. */
+export interface DeviceApproveInput { userCode: string; ws?: WorkspaceId; agents?: { index: number; agt: AgentId; name?: string; purpose?: string }[] }
 export interface DeviceDenyInput { userCode: string }
 export interface DeviceDecision {
   id: DeviceRequestId;
@@ -444,8 +447,12 @@ export interface CatalogEntry {
   deploySteps: DeployStep[];
   keyRequirements: KeyRequirement[];
   scopeTypes: { type: string; label: string; labelPlural: string }[];
+  /** the configure screen only (manifest `ui.configurePath`) */
   hasConfigureUi: boolean;
   configurePath: string | null;
+  /** v0.1.14 (Fleet): the manifest declares `ui` (Open is possible); a launch without `path` lands on `launchPath` */
+  hasUi?: boolean;
+  launchPath?: string | null;
   skills: string[];
   companions: { product: ProductId; purpose: string }[];
   costEstimate: CostEstimate | null;
@@ -558,7 +565,12 @@ export interface Edge {
   scopeSummary: string | null;
   enabled: boolean;
   origin: "owner" | "manifest";
-  grantState: "active" | "unlicensed" | "not_deployed" | "paused" | "disabled";
+  /** v0.1.14 (A2A-11): `blocked` = an app→app edge whose companion declaration fails M-CP-2 against the target's current release */
+  grantState: "active" | "unlicensed" | "not_deployed" | "paused" | "disabled" | "blocked";
+  /** v0.1.14 (A2A-11): app→app edges only */
+  blockedReason?: "companion_op_missing" | "target_not_deployed";
+  /** ≤ 200 chars, plain text */
+  blockedDetail?: string;
 }
 export interface Canvas { ws: WorkspaceId; revision: number; nodes: CanvasNode[]; edges: Edge[] }
 export interface CanvasSaveInput { ws: WorkspaceId; revision: number; nodes: CanvasNode[] }
@@ -596,6 +608,11 @@ export interface Instance {
   pendingHolds: number;
   licensed: boolean;
   updateAvailable: ReleaseSummary | null;
+  /** v0.1.14 (C100): companion access changes from the running release to `updateAvailable` (empty = none); the GUI
+   *  shows widening entries before Confirm (the confirm is the consent) */
+  updateCompanionChanges?: CompanionChange[];
+  /** v0.1.14 (A2A-11): this app's companion connections that do not work now */
+  companionIssues?: { target: ProductId | "*"; edge: EdgeId | null; state: "blocked" | "not_deployed" | "unlicensed" | "paused" | "disabled"; reason: "companion_op_missing" | "target_not_deployed" | null; detail: string }[];
   provider: ProviderKey | "own_infra";
   settings: Record<string, SettingValue>;
   lastError: { code: ErrorCode; message: string } | null;
@@ -607,6 +624,15 @@ export interface Instance {
 export type ConsentKind = "holds_pending_all";
 export interface InstanceConsent { kind: ConsentKind; granted: boolean; at: IsoTime | null; by: PersonId | null }
 export interface InstanceConsentInput { ws: WorkspaceId; ins: InstanceId; kind: ConsentKind; granted: boolean }
+/** v0.1.14 (C100) */
+export interface CompanionChange {
+  target: ProductId | "*";
+  change: "added" | "removed" | "changed";
+  operations: { added: string[]; removed: string[] };
+  crud: { added: Crud[]; removed: Crud[] };
+  /** true when the update grants more (new ops, new crud, a new target) */
+  widens: boolean;
+}
 export interface InstanceList { items: Instance[] }
 export interface DeployInput { ws: WorkspaceId; product: ProductId; releaseId?: ReleaseId; settings: Record<string, SettingValue> }
 export interface DeployResult { instance: Instance }
@@ -816,7 +842,21 @@ export interface BridgeAckResult { accepted: true; configRevision: number }
 
 // internal
 export interface RouteRegistryDoc { digest: Digest; routes: readonly RouteOp[] }
-export interface Health { ok: boolean; version: string; db: "ok" | "down" }
+/** `ok` = db reachable (platform health checks must not flap on a slow sweep). v0.1.14: `deployWorker` (Core 542d51a). */
+export interface Health { ok: boolean; version: string; db: "ok" | "down"; deployWorker?: DeployWorkerHealth }
+export interface DeployWorkerHealth {
+  /** the sweep ran < 90 s ago */
+  alive: boolean;
+  lastSweepAt: IsoTime | null;
+  /** jobs running in this process */
+  active: number;
+  /** instances queued / deploying / removing */
+  queued: number;
+  /** in flight but no live lease */
+  unowned: number;
+  /** jobs this process resumed since boot */
+  resumed: number;
+}
 
 // ───────────────────────────── schema name map ─────────────────────────────
 // input/output columns name a key of this map, so a typo fails typecheck.

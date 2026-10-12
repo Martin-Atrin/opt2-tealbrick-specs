@@ -248,6 +248,8 @@ export interface ScopeAccessLevel {
 export interface DefaultGrant {
   kind: DefaultGrantKind;
   access: SnakeId;
+  /** v0.1.14 (Connect Q-C2): caller types the grant applies to; default both */
+  callers?: ("agent" | "app")[];
 }
 
 export interface Scope {

@@ -207,6 +207,12 @@ export interface InstanceSlice extends SliceClaims {
   standalone?: StandaloneState;
   /** v0.1.13 (C86): the Portal GUI origin (`https://…`, no path); apps build owner links (`/w/<ws>/open?product=&path=`) */
   portalUrl?: string;
+  /** v0.1.14 (C90): ONLY the targets this app currently holds a companion grant for (one entry per grant); a wildcard
+   *  companion (tb.holds_pending) learns the workspace's apps from it; a consent revoke removes them. SDK: `ctx.companionTargets()`. */
+  companionTargets?: { product: ProductId; ins: InstanceId }[];
+  /** v0.1.14 (C102): the instances holding companion grants that TARGET this instance (Core minted them); `name` = the
+   *  caller's manifest name (≤ 80). The SDK sets `Caller.name` for app callers from it (verified grant `sub`), fallback the instance id. */
+  companionCallers?: { product: ProductId; ins: InstanceId; name: string }[];
 }
 
 // ── Enrolment (BRIDGE §4) — op `bridge_api.enrol` ───────────────────────────
@@ -257,6 +263,8 @@ export interface StatusReport {
     mcpVersions: string[];
   };
   portalReachable: boolean;
+  /** v0.1.14: connections that authenticated (agent assertion / pairing session) since the previous report, latest time each, ≤ 500 */
+  connectionsSeen?: { con: ConnectionId; lastSeen: IsoTime }[];
   /** v0.1.11: JCS digest() of the `portalKeys` array the bridge trusts after applying `rev`; Core compares it with what it signed (BSD-08 alert) */
   portalKeysDigest?: Sha256Digest;
   apps: {
@@ -278,8 +286,10 @@ export interface StatusReport {
   connectionsCreated: { con: ConnectionId; agt: AgentId; method: "pairing"; clientName: string; createdAt: IsoTime; pairingJti: Ulid }[];
   connectionsRevoked: { con: ConnectionId; reason: "refresh_reuse" | "client_revoke" }[];
   claims: ClaimRecord[];
-  rejected: { kind: "config" | "grant" | "slice" | "assertion" | "ticket" | "pairing" | "claim"; code: BridgeErrorCode | string; count: number }[];
-  toolsOmitted: { ins: InstanceId; name: string; code: "tool_name_too_long" | "name_collision" | "ceiling" }[];
+  /** v0.1.14 (L3): `bridge_op` = a failed catalog / resolve / mark / scope_summary call to an app (code = the app's refusal or transport error) */
+  rejected: { kind: "config" | "grant" | "slice" | "assertion" | "ticket" | "pairing" | "claim" | "bridge_op"; code: BridgeErrorCode | string; count: number }[];
+  /** v0.1.14 (L3): `catalog_failed` = a dynamic `list` op whose catalog bridge op failed, so its entries are missing */
+  toolsOmitted: { ins: InstanceId; name: string; code: "tool_name_too_long" | "name_collision" | "ceiling" | "catalog_failed" }[];
 }
 export interface ClaimRecord {
   kind: EnrolCodeEntry["kind"];

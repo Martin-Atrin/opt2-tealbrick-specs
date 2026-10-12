@@ -167,7 +167,7 @@ A scope type is an app-declared sub-resource for grants (Connect: accounts; Know
 |---|---|
 | `type`, `label`, `labelPlural` | Id and display names. |
 | `access[] {id, label, crud}` | Access levels for this type, each mapping to a CRUD set. `authorize()` maps an assignment's level → `crud`. |
-| `defaultGrants[] {kind, access}` | Assignments the SDK creates when an edge to a caller first appears (C1). `own` = the caller's own instance (the app creates it if absent); `shared` = instances the app marks shared; `all` = every existing instance. An empty list = nothing until the owner assigns in Configure. |
+| `defaultGrants[] {kind, access}` | Assignments the SDK creates when an edge to a caller first appears (C1). `own` = the caller's own instance (the app creates it if absent); `shared` = instances the app marks shared (v0.1.13, Kanban QA S2: also applied when an instance BECOMES shared later — created shared or switched to shared — for every caller seen before; an existing assignment, i.e. an owner edit, always wins; re-saving an already shared instance never re-grants); `all` = every existing instance. An empty list = nothing until the owner assigns in Configure. |
 | `summaryTemplate` | Used by the SDK default scope-summary bridge op (`/tb/v1/bridge/scope-summary`); variables `{count}`, `{label}`, `{labelPlural}`, `{access.<id>}` (count per level). Apps may override the summary in code; output ≤ 80 chars. |
 
 | Rule | Check |
@@ -330,3 +330,7 @@ None. v0.1 review items applied: S6 (§7), S8 + N6 (§10, §13), N1 (§2, §5.4)
 
 ## v0.1.11 additions (C70)
 - Path bases (§3, §4, §10): build paths (`runtime.build`, `runtime.services[].build`) are repo-relative; skill files and other app files are manifest-relative (relative to the directory that contains the manifest file). `validateAppFiles(m, repoDir, manifestDir = repoDir)` resolves build paths from `repoDir` and skill files from `manifestDir`; `tb-gen` takes the same two directories (`--repo <dir>`; manifest dir = directory of `--manifest`); conformance check M6.paths asserts it. New rule M-RT-9, code `build_path_invalid` (`validateAppFiles` only): a build context is not a directory, or a Dockerfile is not a file, under the repo root.
+
+## v0.1.14 additions
+- `scopes[].defaultGrants[].callers?` (`agent` | `app`, ≥ 1, unique; default both): which caller types a default grant applies to (Connect Q-C2: an apps-only shared sender scope).
+- §12: `ui.configurePath` stays optional; Core's catalog exposes `hasUi` (Open) separately from `hasConfigureUi` (configure screen).
