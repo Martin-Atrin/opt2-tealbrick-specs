@@ -126,7 +126,7 @@ Env value templates (the only `{{…}}` forms allowed): `{{services.<id>.url}}` 
 | M-OP-1 | Ids unique. Every derived MCP tool name ≤ 64 chars (CORE I9): `<product>__<id>` for `agent` ops; for search mode also `<product>__<id>_search` and `<product>__<id>_call` → `tool_name_too_long`. List-mode entry names (`<product>__<entry.name>`) are checked by the SDK when it serves the catalog (same limit). |
 | M-OP-2 | `effect = read` ⇔ `crud = ["read"]` → `effect_crud_mismatch`. |
 | M-OP-3 | `delete ∈ crud` ⇒ `effect ∈ {destructive, money}`; `effect = destructive` ⇒ `delete ∈ crud` (so an irreversible overwrite declares `delete`, e.g. `["update","delete"]`) → `effect_crud_mismatch`. |
-| M-OP-4 | `holdFamily`: absent for `read`/`write`; `= destructive` for `destructive`; `= money` for `money`; optional for `outward`, one of `first_contact|profile_change|live_call` → `hold_family_invalid`. |
+| M-OP-4 | `holdFamily`: absent for `read`/`write`; `= destructive` for `destructive`; `= money` for `money`; for `outward` one of `first_contact|profile_change|live_call|outward|identity` (v0.1.16 C107: every outward op DECLARES a family — absent is accepted by the validator for one more release with a conformance warning `M2.outward_family`, refused from manifest 0.1.12) → `hold_family_invalid`. |
 | M-OP-5 | `create ∈ crud` ⇒ `idempotency = required`; `crud = ["read"]` ⇒ `idempotency ≠ required` → `idempotency_invalid`. |
 | M-OP-6 | `effect ∈ {outward, destructive, money}` or `holdFamily` set ⇒ `receipt = true` → `receipt_required`. |
 | M-OP-7 | `scopeType` names a declared scope; the union of that scope's `access[].crud` ⊇ `op.crud` → `scope_ref_invalid`. |
@@ -337,3 +337,7 @@ None. v0.1 review items applied: S6 (§7), S8 + N6 (§10, §13), N1 (§2, §5.4)
 
 ## v0.1.15 additions (C104, queued)
 - `requires {bridge?: semver}` (optional): the minimum workspace bridge version for features the validator cannot see (a before hook that answers `hold` needs ≥ 0.1.17 — DECLARED by such apps; "any before hook → 0.1.17" was rejected as too strict: an older bridge treats a hold answer as an invalid hook answer → refuse, fail closed, so the declaration is about the feature, not safety). The release signer records `requires.bridge` = max(this, the feature table of `requiredBridgeVersion`): dynamic ops ≥ 0.1.15 (C91 catalog binding), wildcard companion or `tb.holds_pending` as a companion op ≥ 0.1.16. One function in @opt2-tealbrick/manifest; the signer and Core never keep their own table (L1).
+
+## v0.1.16 additions (C107)
+- Hold families: `outward` (messages, posts, reactions, edits to existing contacts or channels) and `identity` (changes to the agent's public identity). `DEFAULT_HELD_FAMILIES` = destructive, money, first_contact, identity (`outward` known, not held by default; Free-card caps still apply; the owner can turn on "ask me before every message").
+- Dynamic ops: a `resolve` answer (`DynamicResolution`) whose effect is `outward` or `money` MUST carry a `holdFamily` (`money` → `money`; outward → one of the outward families). Connect resolves a Gmail/Composio send as `outward` (the owner's READ-UPDATE tier is the consent) and a first message to a new recipient as `first_contact` where it can know it.

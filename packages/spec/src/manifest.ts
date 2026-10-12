@@ -9,14 +9,18 @@ export const MANIFEST_SCHEMA = "tealbrick.miniapp/2" as const;
 export const CRUD_ACTIONS = ["create", "read", "update", "delete"] as const;
 /** Ordered: a dynamic `effectCeiling` admits every effect at or before it in this list. */
 export const EFFECTS = ["read", "write", "outward", "destructive", "money"] as const;
-export const HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money"] as const;
+/** v0.1.16 (C107): + `outward` (messages, posts, reactions, edits to existing contacts or channels) and `identity`
+ *  (changes to the agent's public identity). Every op with outward effects declares a family. */
+export const HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity"] as const;
 /** v0.1.15 (C105): the families an op may declare (= HOLD_FAMILIES; the name Core, GUI and conformance import). */
 export const KNOWN_HOLD_FAMILIES = HOLD_FAMILIES;
 /** v0.1.15 (C105, QA S2: a first-contact DM went out unheld on a default card): the held families of a NEW agent card
  *  and of companion grants (CORE I8 "workspace default held families"). `money` is held always, listed for clarity. */
-export const DEFAULT_HELD_FAMILIES = ["destructive", "money", "first_contact"] as const;
+/** v0.1.16 (C107): + `identity`; `outward` is known but NOT held by default (Free-card caps apply; the owner can turn on
+ *  "ask me before every message"). */
+export const DEFAULT_HELD_FAMILIES = ["destructive", "money", "first_contact", "identity"] as const;
 /** v0.1.13 (G1): families a before hook may hold with = HOLD_FAMILIES + `policy` (a policy app decided). Ops never declare `policy`. */
-export const HOOK_HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "policy"] as const;
+export const HOOK_HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity", "policy"] as const;
 export const AGENT_MODES = ["free", "bound"] as const;
 export const HOOK_PHASES = ["before", "context", "after"] as const;
 export const IDEMPOTENCY_MODES = ["required", "supported", "none"] as const;

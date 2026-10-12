@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.15 → v0.1.16 (C107)
+- Hold families `outward` and `identity`; `DEFAULT_HELD_FAMILIES` += identity (`outward` not held by default). Every outward op declares a family (validator: one release of grace); `resolve` answers with outward/money effect must carry a family. Schema enums (manifest holdFamily, slice appsPolicy.held) extended.
+
 ## Changelog v0.1.14 → v0.1.15 (additive; C104, C105, C98a, Bridge name rule)
 - C104: release `requires {bridge?, sdk?}`, manifest `requires {bridge?}`, `bridge_too_old` (409); one feature table `requiredBridgeVersion` (manifest 0.1.10+). Apps whose before hook can answer hold declare `requires.bridge: "0.1.17"`.
 - C105: `DEFAULT_HELD_FAMILIES` (destructive, money, first_contact) and `KNOWN_HOLD_FAMILIES` are spec vocabulary, re-exported by @opt2-tealbrick/manifest; Core, GUI and conformance import them (L1). Spine T10.
