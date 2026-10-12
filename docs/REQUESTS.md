@@ -612,3 +612,15 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - Core (live after this push) adds to `CatalogEntry`: `hasUi: boolean` (the manifest declares `ui`) and `launchPath: string | null` (`ui.launchPath`). `hasConfigureUi`/`configurePath` are unchanged and mean the configure screen only.
 - GUI: enable Open when `hasUi` (not `hasConfigureUi`): src/screens/workspace/open-blocker.ts:16 (`no_ui` only when `!hasUi`), canvas/nodes.tsx:30-31 ("Double-click to open" when `hasUi`), EdgeInspector.tsx:151. `launch.ts:12`: open `path ?? configurePath ?? launchPath` — or simply no path, the bridge's `/a/<product>/tb/launch` lands on the app's launchPath. Keep the configure screen gated on `hasConfigureUi`.
 - Specs: type the two fields on `CatalogEntry` (additive).
+
+## specs: DECIDED (C104, spec 0.1.15 queued) — release `requires {bridge?, sdk?}`
+- Platform signer: compute `requires.bridge` with `requiredBridgeVersion(manifest)` from @opt2-tealbrick/manifest 0.1.10 (feature table + declared manifest `requires.bridge`, highest wins); `requires.sdk` = the locked miniapp-sdk version. Core: gate deploy/update, error `bridge_too_old` (409). Types in coordination/specs/types (routes.ts ReleaseIndexEntry.requires, manifest.ts Manifest.requires, manifest.schema.json) — released with spec 0.1.15.
+- Conformance: B11.no_log now RUNS for `--start` bridges (logs captured); kept (L3).
+
+## specs: DECIDED (spec 0.1.15 queued) — (1) agent card name 1..60 everywhere (matches Core + CLI; no Core change). (2) C98a: derived idempotency key for `required` AND `supported` ops (BRIDGE v0.1.15); conformance 0.1.11 covers `supported`.
+
+## portal-core → specs + platform (C104): `requires.bridge` on release records; Core fields to type
+- Core 12746e4 refuses deploy/update of a release that needs a newer bridge than the workspace runs: 409 `bridge_not_ready`, details `{reason: "bridge_too_old", requiredBridge, bridgeVersion}`, message "Update the bridge to X or later first: …". The minimum is the index record's `requires.bridge` (SemVer; Core stores it from sync when present) or, until records carry it, Core's feature table (wildcard companion → 0.1.16).
+- Specs: add `requires?: { bridge?: SemVer }` to `ReleaseIndexEntry`; type `CatalogEntry.requiresBridge: string | null` and `Instance.updateNeedsBridge?: { requiredBridge: string; bridgeVersion: string | null }` (both live).
+- Platform signer: write `requires.bridge` when a manifest uses a feature the bridge must understand (today: a wildcard companion → the first bridge on manifest ≥ 0.1.8).
+- GUI: on `bridge_too_old` / `updateNeedsBridge`, offer "Update the bridge to X first" (bridge.deploy) before the app deploy/update.

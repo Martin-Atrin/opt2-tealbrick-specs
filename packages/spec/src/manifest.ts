@@ -10,6 +10,11 @@ export const CRUD_ACTIONS = ["create", "read", "update", "delete"] as const;
 /** Ordered: a dynamic `effectCeiling` admits every effect at or before it in this list. */
 export const EFFECTS = ["read", "write", "outward", "destructive", "money"] as const;
 export const HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money"] as const;
+/** v0.1.15 (C105): the families an op may declare (= HOLD_FAMILIES; the name Core, GUI and conformance import). */
+export const KNOWN_HOLD_FAMILIES = HOLD_FAMILIES;
+/** v0.1.15 (C105, QA S2: a first-contact DM went out unheld on a default card): the held families of a NEW agent card
+ *  and of companion grants (CORE I8 "workspace default held families"). `money` is held always, listed for clarity. */
+export const DEFAULT_HELD_FAMILIES = ["destructive", "money", "first_contact"] as const;
 /** v0.1.13 (G1): families a before hook may hold with = HOLD_FAMILIES + `policy` (a policy app decided). Ops never declare `policy`. */
 export const HOOK_HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "policy"] as const;
 export const AGENT_MODES = ["free", "bound"] as const;
@@ -90,6 +95,8 @@ export interface Manifest {
   settings?: Settings;
   hooks?: Hook[];
   companions?: Companion[];
+  /** v0.1.15 (C104) */
+  requires?: ManifestRequires;
   needsAgentDirectory?: boolean;
   skills?: Skill[];
   harnessHints?: HarnessHint[];
@@ -330,6 +337,11 @@ export interface Hook {
   match: HookMatch;
   /** 100..2000, default 2000. */
   timeoutMs?: number;
+}
+
+/** v0.1.15 (C104): declared minimum versions (features the validator cannot see, e.g. a before hook that answers `hold`). */
+export interface ManifestRequires {
+  bridge?: string;
 }
 
 export interface Companion {

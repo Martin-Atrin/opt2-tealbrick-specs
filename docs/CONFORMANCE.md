@@ -156,3 +156,9 @@ A bridge or SDK build pins its channel's Portal Root Keys; a conformance run can
 ## v0.1.14 — package 0.1.10
 - `B8.idempotency_derived` (C98) replaces `B8.idempotency_required`: a required op called without `_meta` succeeds with a non-empty forwarded key; an identical retry in the same session gets the same key; another input gets another key. Mini-bridge fault `noDerivedKey` must fail it.
 - `A14.hold_retry_once` tries schema-valid variants until one is not refused by the app (a variant that targets an unreachable scope instance proves nothing about holds), as `A10` does. Found by the template 0.1.7 proof.
+
+## v0.1.15 — package 0.1.11
+- `M2.hold_family_known` (C105): every op `holdFamily` ∈ `KNOWN_HOLD_FAMILIES` (and never `policy`); fails otherwise (the rule is also the schema enum; the check proves the app was validated against THIS vocabulary).
+- Fakes (L1): the fake bridge/Portal mint agent and companion grants with `held = DEFAULT_HELD_FAMILIES`, and build slices from the shared shape incl. `companionTargets` / `companionCallers`; new app check `A12.caller_name` (C102): a companion app caller listed in `companionCallers` reaches the handler with `caller.name` = that name (the template exposes it in receipts: `caller.name` of the receipt row), and an unlisted caller gets its instance id.
+- `B8.idempotency_derived` also covers a `supported` op (C98a).
+- `A12.app_caller_held` (C105a): an app caller whose companion grant `held` = `DEFAULT_HELD_FAMILIES` calls a `first_contact` op → `held` with a holdId; after approval the same input + the same idempotency key → runs once; the same call again → held again (C8). n/a when the app has no first_contact op.

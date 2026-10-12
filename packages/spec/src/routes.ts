@@ -183,12 +183,20 @@ export interface Workspace {
   /** Derived, never stored: drives the onboarding overlay. */
   onboarding: { infrastructure: boolean; agent: boolean; agentAuthorised: boolean; app: boolean };
   counts: { agents: number; instances: number };
+  /** v0.1.15 (C105a) */
+  appsPolicy?: AppsPolicy;
   createdAt: IsoTime;
 }
 export type WorkspaceListInput = PageQuery;
 export type WorkspaceList = Page<Workspace>;
 export interface WorkspaceCreateInput { name: string }
-export interface WorkspaceUpdateInput { ws: WorkspaceId; name?: string; channel?: "stable" | "dev" }
+/** v0.1.15 (C105a): `appsPolicy` = the workspace "apps policy" for app-initiated and app→app calls (held families;
+ *  `money` must stay in it, `422 policy_invalid` otherwise). Each change re-mints the companion grants (new `polrev`). */
+export interface WorkspaceUpdateInput { ws: WorkspaceId; name?: string; channel?: "stable" | "dev"; appsPolicy?: AppsPolicy }
+export interface AppsPolicy {
+  /** default DEFAULT_HELD_FAMILIES */
+  held: HoldFamily[];
+}
 export interface SetInfrastructureInput { ws: WorkspaceId; provider: ProviderKey; destinationId: string }
 export interface CostEstimateInput { ws: WorkspaceId; products: ProductId[] }
 export interface CostEstimate {
@@ -344,7 +352,7 @@ export interface DeviceStartAgentInput {
   machine_label: string;
   /** harness option id */
   harness: string;
-  /** v0.1.14 (C96): `name` (1..80) / `purpose` (≤ 280) are suggestions from the CLI; the owner may edit them on the device page */
+  /** v0.1.14 (C96): `name` (1..60, v0.1.15: = the agent card name rule) / `purpose` (≤ 280) are suggestions from the CLI; the owner may edit them on the device page */
   agents: { agt?: AgentId; public_key: Jwk; name?: string; purpose?: string }[];
 }
 export type DeviceStartInput = DeviceStartOwnerInput | DeviceStartAgentInput;
@@ -532,6 +540,11 @@ export interface ReleaseIndexEntry {
   commit: string;
   tag: string | null;
   publishedAt: IsoTime;
+  /** v0.1.15 (C104): minimum versions this release needs; the signer computes `bridge` with @opt2-tealbrick/manifest
+   *  `requiredBridgeVersion(manifest)` (max of the feature table and the manifest's declared `requires.bridge`), `sdk` from
+   *  the app's locked @opt2-tealbrick/miniapp-sdk. Core refuses deploy / update when the workspace bridge is older
+   *  (`bridge_too_old`, 409, with the needed version). Absent = no requirement. */
+  requires?: { bridge?: string; sdk?: string };
 }
 export interface ReleaseIndexBody {
   schema: "opt2.release-index/v2";

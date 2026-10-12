@@ -334,3 +334,6 @@ None. v0.1 review items applied: S6 (§7), S8 + N6 (§10, §13), N1 (§2, §5.4)
 ## v0.1.14 additions
 - `scopes[].defaultGrants[].callers?` (`agent` | `app`, ≥ 1, unique; default both): which caller types a default grant applies to (Connect Q-C2: an apps-only shared sender scope).
 - §12: `ui.configurePath` stays optional; Core's catalog exposes `hasUi` (Open) separately from `hasConfigureUi` (configure screen).
+
+## v0.1.15 additions (C104, queued)
+- `requires {bridge?: semver}` (optional): the minimum workspace bridge version for features the validator cannot see (a before hook that answers `hold` needs ≥ 0.1.17 — DECLARED by such apps; "any before hook → 0.1.17" was rejected as too strict: an older bridge treats a hold answer as an invalid hook answer → refuse, fail closed, so the declaration is about the feature, not safety). The release signer records `requires.bridge` = max(this, the feature table of `requiredBridgeVersion`): dynamic ops ≥ 0.1.15 (C91 catalog binding), wildcard companion or `tb.holds_pending` as a companion op ≥ 0.1.16. One function in @opt2-tealbrick/manifest; the signer and Core never keep their own table (L1).

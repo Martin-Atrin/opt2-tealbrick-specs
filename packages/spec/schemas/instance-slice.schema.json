@@ -185,6 +185,15 @@
         }
       }
     },
+    "appsPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["held"],
+      "description": "v0.1.15 (C105a): the workspace apps policy; companion grants carry held = this list.",
+      "properties": {
+        "held": { "type": "array", "uniqueItems": true, "items": { "enum": ["first_contact", "profile_change", "live_call", "destructive", "money"] } }
+      }
+    },
     "portalUrl": {
       "$ref": "workspace-config.schema.json#/$defs/httpsUrl",
       "description": "v0.1.13 (C86): the Portal GUI origin (no path); apps build owner links `<portalUrl>/w/<ws>/open?product=<p>&path=<path>`."

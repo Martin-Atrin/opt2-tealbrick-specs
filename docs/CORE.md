@@ -2,6 +2,12 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.14 → v0.1.15 (additive; C104, C105, C98a, Bridge name rule)
+- C104: release `requires {bridge?, sdk?}`, manifest `requires {bridge?}`, `bridge_too_old` (409); one feature table `requiredBridgeVersion` (manifest 0.1.10+). Apps whose before hook can answer hold declare `requires.bridge: "0.1.17"`.
+- C105: `DEFAULT_HELD_FAMILIES` (destructive, money, first_contact) and `KNOWN_HOLD_FAMILIES` are spec vocabulary, re-exported by @opt2-tealbrick/manifest; Core, GUI and conformance import them (L1). Spine T10.
+- C98a: derived idempotency key also for `supported` ops. Agent card name 1..60 everywhere.
+- C105a: workspace `appsPolicy {held}` (default DEFAULT_HELD_FAMILIES) = the `held` claim of every companion grant (I8) and a slice field; app-initiated and in-handler app calls are held by the target app like agent calls. C105b: refusal names stay the spec's (`no_grant`, BRIDGE §8.4).
+
 ## Changelog v0.1.13 → v0.1.14 (additive; C90, C91, C96, C98, C100, C102, A2A-10/11, L3, Kanban S2, Connect Q-C2, Fleet)
 - Slice `companionTargets` (C90) and `companionCallers` (C102); SDK `ctx.companionTargets()`, `Caller.name` for app callers.
 - C91 bridge-op binding rule normative (`bridgeOpBinding` / `bridgeOpProofClaims`, manifest 0.1.8).
@@ -219,13 +225,13 @@ Bridge key store (sealed, bridge volume) holds workspace default keys (manifest 
 | I5 | The local relay speaks stdio only in opt2 (no loopback HTTP listener) → no relay-local token exists. |
 | I6 | Config pull returns the signed config JWS itself (instance slices embedded); acks and status reports carry only digests, never codes or key values. Wire types for enrol / config / ack / status live in `types/bridge.ts`; `types/routes.ts` imports them. |
 | I7 | Connection method names: `key` and `pairing` (CREDENTIALS). |
-| I8 | Companion grants are minted with `mode: "bound"`, `wf` = the manifest-declared companion operations, `held` = the workspace default held families, no caps (S5; `money` always held); the instance slice field is `grants`. |
+| I8 | Companion grants are minted with `mode: "bound"`, `wf` = the manifest-declared companion operations, `held` = the workspace apps policy `appsPolicy.held` (v0.1.15 C105a; default `DEFAULT_HELD_FAMILIES`, owner-editable in workspace settings), no caps (S5; `money` always held); the instance slice field is `grants`; the slice also carries `appsPolicy`. Every app→app call — in a handler or app-initiated (C85) — is held by the TARGET app's `authorize()` from that claim, exactly as an agent call is held from its card policy; the bridge never decides holds (§7). |
 | I9 | The manifest validator rejects an operation whose MCP tool name `<product>__<op>` exceeds 64 characters. |
 | I10 | Vocabularies live in `@opt2-tealbrick/spec` (data); `@opt2-tealbrick/manifest` re-exports them. |
 | I11 | Bridge first start without Portal (pure self-hosting with agents) is next wave; opt2 standalone = leaving Portal (handover). An app run standalone without a bridge serves persons only. |
 | I12 | OAuth refresh rotation: the immediately previous refresh token is accepted once within 30 s (network-retry grace); any other reuse revokes the connection. |
 | I13 | Env names (one each): `TB_ENROL_CODE`, `TB_KEK`, `TB_PORTAL_KEYS`, `TB_BRIDGE_URL`, `TB_INSTANCE_ID`, `TB_DATA_DIR`, `TB_BACKUP_DIR` (full list in SDK-API). |
-| I14 | Free caps claim shape: `caps: { write?: Cap, outward?: Cap, destructive?: Cap }`, `Cap = { max: integer ≥ 0, per: "hour" \| "day" }`; counted by the app per (agent, effect) over a sliding window from receipts. Agent Policy defaults for Free agents: write 500/hour, outward 30/hour, destructive 20/day (destructive is also a default held family). `money` has no cap: always held. |
+| I14 | Free caps claim shape: `caps: { write?: Cap, outward?: Cap, destructive?: Cap }`, `Cap = { max: integer ≥ 0, per: "hour" \| "day" }`; counted by the app per (agent, effect) over a sliding window from receipts. Agent Policy defaults for Free agents: write 500/hour, outward 30/hour, destructive 20/day; default held families = `DEFAULT_HELD_FAMILIES` (destructive, money, first_contact; v0.1.15 C105). `money` has no cap: always held. |
 | I15 | `instances.remove` needs browser confirmation and an explicit `deleteData` (default false: service stopped, volumes and backups kept). Core never deletes customer data implicitly. |
 | I16 | Own-infrastructure bridge enrolment (PRD §3.5, J3) is live in opt2 under an "Advanced" panel; only Coolify as a deploy PROVIDER is greyed out. |
 | I17 | Offers are reviewed data shipped in the signed release index (`-platform`) and verified against Stripe at Core start; no env-var offer lists. |

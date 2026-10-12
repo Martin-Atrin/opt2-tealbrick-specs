@@ -213,6 +213,9 @@ export interface InstanceSlice extends SliceClaims {
   /** v0.1.14 (C102): the instances holding companion grants that TARGET this instance (Core minted them); `name` = the
    *  caller's manifest name (≤ 80). The SDK sets `Caller.name` for app callers from it (verified grant `sub`), fallback the instance id. */
   companionCallers?: { product: ProductId; ins: InstanceId; name: string }[];
+  /** v0.1.15 (C105a): the workspace apps policy (Core-filled; default DEFAULT_HELD_FAMILIES). Informational for the app
+   *  (e.g. to say "this send waits for the owner"); enforcement is the companion grant `held` claim = this list (CORE I8). */
+  appsPolicy?: { held: HoldFamily[] };
 }
 
 // ── Enrolment (BRIDGE §4) — op `bridge_api.enrol` ───────────────────────────
