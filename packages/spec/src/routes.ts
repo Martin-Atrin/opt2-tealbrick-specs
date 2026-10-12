@@ -575,6 +575,9 @@ export interface ReleaseIndexEntry {
   commit: string;
   tag: string | null;
   publishedAt: IsoTime;
+  /** v0.1.21 (C113): true = a dev-only product (signer DEV_ONLY_PRODUCTS: QA fixtures, spine samples). Signed in the index; Core
+   *  never offers it to a STABLE workspace (no dev fallback for it) and refuses `instances.deploy` / `update` there. */
+  devOnly?: true;
   /** v0.1.15 (C104): minimum versions this release needs; the signer computes `bridge` with @opt2-tealbrick/manifest
    *  `requiredBridgeVersion(manifest)` (max of the feature table and the manifest's declared `requires.bridge`), `sdk` from
    *  the app's locked @opt2-tealbrick/miniapp-sdk. Core refuses deploy / update when the workspace bridge is older

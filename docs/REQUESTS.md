@@ -653,3 +653,20 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - `CatalogEntry.operations[].dynamic?: { mode, crudCeiling, effectCeiling }` + `description?` (dynamic ops only), and the same `dynamic`/`description` on `DeviceRequest.agents[].adopt.grants[].read[]/write[]` (F24: the form says what a dynamic op unlocks).
 - `Instance.lastError` from the bridge's refusal: Core keeps `StatusReport.rejected[]` kind `"manifest"` (bridge ≥ 0.1.18, detail "<product> <ins>") per app and shows `manifest_invalid` / `bridge_not_ready` with a plain message until a later ack drops it. Please add `"manifest"` to `StatusReport.rejected[].kind` and `detail?` if not typed yet.
 - (F46, Core 2b1e8a2) `DeviceRequest.agents[].adopt.grants[].suggested: boolean` — false = a deployed, licensed app the agent did not name, listed so the owner can add it (nothing ticked).
+
+## knowledge → specs (done): CONFORMANCE "v0.1.18 — package 0.1.12" adopted in Knowledge 0.1.12
+- Both dated waivers (A12.caller_name, A11.resolve_family) are removed. `tealbrick-conformance.json` now holds `setup` (agent A `areas_list` captures an area; the owner grants the companion app caller `read_write` on it with `tb.scopes_set`), `inputsAs.app.remember` and `dynamic.engine.resolveTools`.
+- The stub engine lives only in `conformance.start.ts`, behind `TBCONF_STUB_ENGINE=1` (set in the `conformance` script). `test/harness-isolation.test.ts` fails if any file under `src/` contains `TBCONF_`.
+- Result with conformance 0.1.12: app 122 pass / 21 n-a, manifest 17 pass / 4 n-a.
+- Finding for Specs: Knowledge has no op that creates an area (areas come from `agentAdded`), so the app caller's fixture area is agent A's first listed area. Fine for the check; a future "area create" op would let `as: "app"` own one.
+
+## bridge → specs (open): shared wf-limit helper (L1, C111a)
+- Bridge 0.1.19 tools/list mirrors gate() step (4) locally: `(grant.mode === "bound" || grant.wf.length > 0) && !grant.wf.includes(op.id)` → not listed. gate() enforces it per call from @opt2-tealbrick/manifest 0.1.12.
+- Ask: export the rule from the manifest package (e.g. `opInGrantWorkflow(claims, opId): boolean`, used by gate() itself) so listing and gate cannot drift. The bridge adopts it in the next release.
+
+## portal-core / platform → specs (C113): release index `devOnly`, please type
+- Release index record (`opt2.release-index/v2`, `registry/index.json`, covered by `indexDigest`): `devOnly?: true`. Absent = false. Signer (platform c27c643): every release of a product in `DEV_ONLY_PRODUCTS` (`ci/tb-ci.ts`: sample-gate, sample-caller, sample-pay, sample-mismatch) carries it and has channel `dev`; a stable record of them is refused.
+- Core (81c7c27) reads it ONLY from the verified index into `products.dev_only` (set and cleared by the sync). A stable-channel workspace never gets a devOnly product: not in `catalog.list`; `instances.deploy` (also with `releaseId`), `instances.register_own_infra`, `instances.update` to another release and `instances.rollback` answer `release_not_deployable` with `details.reason: "dev_only"`. Dev fallback on or off makes no difference.
+- Please type: the index record field (if the spec types the index) and `ErrorDetails` reason `"dev_only"` for `release_not_deployable`. No new route, no claim change.
+
+## specs: DONE (C113) — spec 0.1.21 types `ReleaseIndexEntry.devOnly?: true` and documents `release_not_deployable` + `details.reason: "dev_only"` (PORTAL-API v0.1.21).

@@ -517,6 +517,8 @@ export declare function startApp(app: App, env: Record<string, string | undefine
  */
 export interface StartHooks { portalRootKeys?: Ed25519PublicJwk[] }
 export interface RunningApp {
+  /** v0.1.21: the port the app listens on (harness `port`, else manifest runtime.port) */
+  readonly port: number;
   readonly status: () => HealthStatus;
   readonly receipts: ReceiptStore;
   readonly scopes: ScopeStore;
