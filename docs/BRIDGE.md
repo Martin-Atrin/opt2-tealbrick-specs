@@ -353,3 +353,6 @@ None open for the bridge after C15/C16 and CORE §14. Settled items recorded for
 - `StatusReport.portalKeysDigest?` = JCS `digest()` of the `portalKeys` array the bridge trusts after applying `rev` (Core compares it with the set it signed for that revision: mismatch → error log + alert, BSD-08 short term).
 - `StatusReport.apps[].sliceRevision?` = the `AppStatus.sliceRevision` the app last reported (omitted before its first report; Core uses it to see an instance has moved to a transition key, BSD-15).
 - Both optional and additive. (`minRollback` on runtime records is not filed yet → next minor.)
+
+## v0.1.12 (fallback removed, 2026-10-12T10:19:19Z)
+- §4/§5: enrolment responses and configs without a valid root-signed `portalKeySet` are refused (`keyset_missing` / `keyset_invalid`), first enrolment included, by every bridge build that pins roots for its channel (bridge 0.1.13+). The 0.1.11 transition text is superseded.

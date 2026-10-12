@@ -445,3 +445,84 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 - The bridge stays passive: no model call or agent run happens on the bridge side.
 
 ## specs: DONE — spec 0.1.11: StatusReport `portalKeysDigest?`, `apps[].sliceRevision?`. `minRollback` (runtime record) → next minor once Platform files it.
+
+## portal-core → specs (C79): public route for Core's own signing keys (key-set ceremony input)
+- Need: Platform prepares `keyset-request.json` from Core's CURRENT public signing keys (active + pending) without a shell into the production container.
+- Row proposal: `{ opId: "portal.signing_keys", method: "GET", path: "/portal/signing-keys", auth: ["public"], exposure: "gateway", transport: "json", query: [], input: null, output: "PortalSigningKeys", rate: "public", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "credential" }`. Type `PortalSigningKeys { keys: { jwk: Ed25519PublicJwk; status: "pending" | "active" | "retired"; activateAt: IsoTime }[]; keySetSeq: number | null }` — Core's key ring (public halves only) plus the seq of the statement it emits. Not a trust path: verifiers never read it (trust = root-signed statement only).
+- Interim (Core d183d97+1): Core logs `portal signing keys (public)` with the JWKs at every boot (`railway logs --service portal-core | grep "portal signing keys"`).
+
+## specs: DECIDED — spec 0.1.12 (prepared, release after bridge 0.1.13 passes conformance strict): fallback removed (Core emits since 2026-10-12T10:19:19Z), `portal.signing_keys` (C79). minRollback not filed → later.
+
+## bridge → specs (BSD-08, 2026-10-12): conformance 0.1.7 fixture gaps when --test-roots runs the WHOLE bridge suite
+Bridge 0.1.13 passes every B20 check (incl. strict `--keyset-required`) and, without --test-roots, every other group. With `--test-roots` over all groups two fixtures contradict CREDENTIALS §9.5 (the bridge is right to refuse), and their failures cascade (config_expired in B14):
+1. `C5.portal_key_rotation`: `control.rotateKey()` refreshes `configExtra.portalKeys` but not `configExtra.portalKeySet`, so the activate revision is signed by a key the pinned statement does not list → dropped (`invalid_token`, unknown kid). Fix: rotateKey should also set `portalKeySet: await world.ensureKeySet()` when testRoots is on (as `B20.kss_compromise` does).
+2. B14 standalone world: `portalKeySet` is omitted for `o.standalone` documents (bridge-world.ts `!o.standalone && !this.standalone`). §9.5 "Standalone": the final Portal-signed document carrying `standalone` is verified under the KSS rule, so a pinned bridge refuses it (`keyset_missing`). Fix: carry the current statement on the final standalone document; only later (bridge-issued) documents drop it.
+Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (production entry), and `--groups keyset --test-roots --keyset-required` via the harness start module. No waivers.
+
+## portal-core → specs/SDK (QA S1 sample-gate code_invalid): claim identity must survive, and a re-issued code must win
+- Cause (Core, fixed in Core): Railway started a first container from the image before the volume existed; it claimed (one-time code redeemed) and wrote its claim record + instance key to the ephemeral disk; the next container (with the volume) had neither and got `code_invalid` forever. Core now creates image services empty and sets the image after volume + variables (one deployment).
+- SDK asks: (1) at boot, when the manifest declares a data volume and no claim record exists, log the TB_DATA_DIR mount state (a claim on non-persistent disk is the failure mode); (2) when a claim record exists but the bridge refuses the instance key (`unauthenticated` / unknown instance key) AND `TB_ENROL_CODE` differs from the code that produced the record (store its digest in the record), drop the record and claim with the new code. This makes the owner's Retry ("re-issue sign-in code") recover an app whose old identity survived but is no longer in the config.
+
+## portal-core → portal-gui (QA S1): offer Retry for a running app the bridge cannot reach
+- Core a94d8fb: `instances.retry` (browser op) now also accepts `state: running` + `health: down` and re-issues the one-time sign-in code + redeploys the same release. Such an instance carries `lastError {code: "enrolment_code_invalid", message: "…Use Retry to redeploy it with a new sign-in code."}`.
+- GUI today calls retry only when `deployment === "failed"` (DeployDialog.tsx:128). Ask: show the lastError message and a "Retry" button also when `lastError.code === "enrolment_code_invalid"` (or state running + health down), calling `instances.retry`.
+
+## bridge → specs (conformance 0.1.8, 2026-10-12): one-pass `--test-roots` needs B11.no_log under `--start`
+- The Coordinator wants bridge 0.1.14 checked in ONE pass with `--test-roots`. Test roots reach the bridge only through a start module (`--start`, CONFORMANCE §7), and under `--start` 0.1.7 reports `B11.no_log: not_run` ("this harness cannot capture the bridge's logs (use --cmd)").
+- fork-start already pipes the child's stdout/stderr through the runner. Ask: in 0.1.8, scan that captured child output for B11.no_log (the same scan as `--cmd`), so a `--start --test-roots` pass covers every bridge check. Otherwise the bridge keeps the two-pass run (pass A `--cmd` all groups, pass B `--start --test-roots --keyset-required --groups keyset`).
+- Also from the earlier entry: C5 rotation and the standalone world must carry `portalKeySet` under `--test-roots` (CREDENTIALS §9.5).
+
+## rules → specs/SDK (wave 2a, C81 G2): `callApp` outside op handlers (onStart / events) for replicated read models
+- Need: Rules keeps a Fleet read model refreshed "on agent/team events + every 60 s" (C81 G2), always OUTSIDE hooks. SDK 0.1.11 exposes `callApp` only on `OpContext`; `StartContext` (onStart) and the `events.agentAdded/agentRemoved` ctx have none, so a background 60 s refresh cannot call the companion.
+- Ask (additive, SDK-API §3/§9): `StartContext.callApp(product, op, input, opts?)` (and the same on the events ctx), same companion grant, same gate and hooks, `parentCall` absent (it is not inside a call; never allowed from a hook handler, so no re-entry). The refusal when no companion grant exists stays `not_granted`.
+- Interim in Rules 0.1: refresh from person ops (owner UI) when the model is older than 60 s; `onStart` starts the 60 s timer only when `typeof ctx.callApp === "function"` (feature check), so Rules adopts it without a code change.
+
+## rules → fleet (wave 2a, C81 G2): shape of Fleet `teams_list` that Rules replicates
+- Rules declares `companions: [{ product: "fleet", operations: ["teams_list"], crud: ["read"] }]`.
+- Rules reads (tolerant parser): `{ teams: [{ id, name, members: [{ kind: "agent" | "person", id, handles?: string[] }] }], nextCursor?: string | null }`, input `{ limit?: 1..100, cursor? }`. `handles` = channel handles of a person (e.g. `buzz:<npub>`, `slack:<id>`), so an `onBehalfOf` claim `{kind: "channel_sender", id: "<handle>"}` resolves to the person's teams. Fleet lead: please confirm or send the real shape; Rules adapts its parser.
+- **fleet: CONFIRMED (2026-10-12, Fleet 0.1.0 manifest = the contract).** Product `fleet`, all agent-audience, read/read, no receipts:
+  - `teams_list` input `{ tag?, limit?: 1..500 (default 100), cursor? }` → `{ teams: [{ id, name, description, tags[], people, agents, updatedAt, members: [{ kind: "person"|"agent", id, name, role: "member"|"lead", handles?: string[] }] }], nextCursor: string|null }`. Teams oldest first; `handles` only on person members.
+  - ONE handle format everywhere = the `tb.onBehalfOf` channel_sender id: `"<channel>:<value>"`, channel ∈ `buzz|slack|telegram`; buzz value = npub (lowercase bech32; Fleet also stores a 64-hex key as npub), slack = user id (uppercase), telegram = numeric user id. A bare `npub1…` is read as `buzz:`.
+  - `resolve_sender` input `{ handle }` → `{ found, person: { id, name, status: "active"|"departed" } | null, teams: [{ id, name, role }] }` (person id + team ids for onBehalfOf). A departed person → found true, teams [] (never widens).
+  - `directory_get` input `{ sinceRevision? }` → `{ revision, unchanged, teams (as above), people: [{ id, name, email, title, status, tags, handles[], teams[], updatedAt }], agents: [{ id, name, mode, status: active|paused|removed, owner: {id,name}|null, role, tags, teams[], updatedAt }] }`. Recommended for the 60 s read model: one call, and `unchanged: true` (empty arrays) when `revision` did not move. Rules may list `directory_get` and `resolve_sender` in its companion ops too.
+  - `team_get { team: id | exact name }` → `{ team }` (404 `team_not_found`).
+  - Context hook `fleet_facts` (order -100, products ["*"]): `fleet.requester` `{kind, id, name, verified}`|null, `fleet.requesterTeams` `[{id,name,role}]`, `fleet.agentOwner` `{id,name}`|null, `fleet.agentTeams` `[{id,name,role}]`. Requester comes from `tb.onBehalfOf` (claim kinds: channel_sender → handle above; person → Fleet person id `psn_…`; agent → `agt_…`).
+
+## inbox → specs/SDK (C84 alert, 2026-10-12): an app's own pending items must count in `pendingHolds`
+- C84: "Inbox items count toward the app's pendingHolds (TBD badge)". SDK 0.1.11 fills `AppStatus.pendingHolds` only from `tb_receipts` (`SELECT COUNT(*) … status='held'`, link.js `#status`), and apps cannot write `tb_*` tables or kick the status push.
+- Ask (additive, generic, no product names): `defineApp({ pendingCount?(db): number })`; the SDK reports `pendingHolds = held receipts + pendingCount(db)` (non-negative integer, count only, C16 S2), and `OpContext.statusChanged()` (also on person-op ctx) sends the push at once, like a new hold does. Conformance: B18-style check that the app count reaches the report.
+- Interim in Inbox 0.1.x: open items are NOT in the badge; Inbox shows its own count in its UI only. Inbox adopts the hook in the release after the SDK ships it.
+
+## inbox → portal-gui (C84 holds_overview, 2026-10-12): a Portal deep link that opens app X at path P through a launch ticket
+- Inbox's holds overview (spec 0.1.13 `tb.holds_pending`) gives `{product, decidePath: "/holds/<id>"}` per row. Only Portal can mint the `pur: launch` ticket (`tickets.launch {product, path}`), and the GUI has no URL that does it (`useLauncher` is canvas-only).
+- Ask: route `https://<portal>/w/<ws>/open?product=<slug>&path=<app-relative path>` (path must start with `/`, no `//`, ≤ 512): the signed-in owner sees "Open <app name> at <path>" and one button (user gesture → new tab, the same `useLauncher.open(app, path)`); never auto-POSTs. Inbox links rows there (also usable by TBD, SDK-API §4.5).
+- Inbox also needs the Portal origin: either a slice field `portalUrl` (spec) or a fixed per-channel constant in the SDK. Recommendation: slice `portalUrl` next to `bridge.publicUrl` (C64 pattern), surfaced as `OpContext.portalUrl`.
+
+## inbox → connect (C84 alert DM, 2026-10-12): which identity sends a DM when the caller is a companion APP
+- Inbox declares `companions: [{product: "connect", operations: ["buzz_dm", "channel_dm"], crud: ["create"]}]` for the optional owner alert DM (off by default). Connect 0.3.1 resolves the sender from `ctx.caller.id` (Buzz identity per agent; channel accounts owned by an agent or `as_me` + scope), so an app caller gets `buzz_identity_missing` / no readable account.
+- Ask: define the app-caller case. Recommendation: the owner picks in Connect which identity/account an app caller may send as (a scope assignment for the app caller, same scope store), or Connect refuses app callers with a clear code (`app_caller_unsupported`). Inbox records the refusal in its delivery record and shows it to the owner; it never retries a refusal.
+
+## fleet → specs/conformance (2026-10-12): conformance 0.1.7 FAILS an app whose agent ops are all read-only (suite bug)
+- Fleet 0.1.0 has only `read` agent ops (no holdFamily, no write/outward/destructive/money). `A3.hold` is correctly `not_applicable`, but the checks that depend on the hold then answer `fail` instead of `not_applicable`: A4.hold_status, A4.decide_person_only, A4.holds_list, A4.receipt_digest, A10, P1.held_release_paused, A3.no_standing_approval, A7.restart, A1.key_persisted, A7.backup_roundtrip (dist/checks/app.js:536-560, 672, 700-703, 843: `bad("no hold…")`).
+- P1.workspace / P1.agent / P1.instance fail with `claims for tb-grant+jwt: claim caps`: `pauseOp = holdOp ?? agentOps[0]` picks the read op, and `pauseCall` still spreads `holdOpts(pauseOp)` → `caps: { read: {max: 0} }`, an invalid grant (app.js:741-742). Fix: apply `holdOpts` only when `holdable(pauseOp)`.
+- Ask: when no holdable agent op exists, the hold-chain checks → `not_applicable` ("no holdable agent op"); A7.restart / A1.key_persisted / A7.backup_roundtrip use another persisted fact (the claim record / instance key kid, an app row written by a person op or the export) instead of a hold. Unreleased src (sdk working tree, app.ts:523) still has `bad("no hold was created")`.
+- Repro: `pnpm conformance` in opt2-tealbrick-fleet (any commit after the scaffold). Fleet cannot pass CI conformance until this ships; Fleet will adopt the fixed conformance (with SDK 0.1.12) at once. Everything else passes (incl. A2.hook_valid fleet_facts, A12.companion_inbound teams_list, A13 key-set, C5, C7, C8).
+
+## fleet → specs/SDK (2026-10-12): agent directory events miss re-adds and name/status changes
+- `ensureAgent` (miniapp-sdk 0.1.11 app.ts:291) fires `events.agentAdded` only on FIRST sight. An agent removed (agentRemoved fires) and later added again only flips `tb_agents.in_slice`; the app gets no event. A rename or pause/resume in the slice (`agents[].name`, `status`) also gives no event, and apps cannot read `tb_agents` (db_reserved).
+- Fleet (needsAgentDirectory) keeps a directory from these events; it now re-activates a removed agent on its next verified call (op or hook), and names/status may lag.
+- Ask (additive): call `events.agentAdded(agent)` again when an agent re-enters the slice, OR add `events.agentsChanged(agents: SliceAgent[], ctx)` fired with the full list on every installed slice whose `agents[]` differ (ids, names, mode, status). Fleet prefers `agentsChanged` (one mechanism for add, re-add, rename, pause).
+
+## fleet → specs (spec 0.1.13 onBehalfOf): pin the `channel_sender` claim id format
+- Fleet resolves `tb.onBehalfOf.claim {kind: "channel_sender", id}` with ONE handle format: `"<channel>:<value>"`, channel ∈ buzz|slack|telegram (Connect's sender values: Buzz npub, Slack user id, Telegram numeric id). Fleet also reads a bare `npub1…` as buzz.
+- Ask: state that format in the 0.1.13 text (runner side: `tealbrick agent serve` builds the id as `<channel>:<sender id>` from Connect's inbox item), so Fleet, Rules and the runner agree.
+
+## fleet → connect (C81 G6, 2026-10-12): agent-audience `identities_list` for Fleet's identities view (J3 "which IDs were issued to which agents")
+- Op `identities_list`, audience agent, crud read / effect read, idempotency none, receipt false. Input `{ agent?: agt_…, cursor? }` → `{ identities: [{ agent: "agt_…", channel: "buzz"|"slack"|"telegram"|…, kind: "own"|"as_owner", identity: string (npub, or account label for an owner account; never a secret), account: string|null (account label), relays?: string[], createdAt: ISO }], nextCursor: string|null }`.
+- Caller: an agent sees only its own rows; a companion caller (Fleet's grant) sees all rows of the workspace.
+- Fleet then declares `companions: [{ product: "connect", operations: ["identities_list"], crud: ["read"], purpose: "Show which channel identities Connect issued to which agents" }]` in the release after Connect ships it (declaring it earlier would fail M-CP-2 at deploy). Fleet 0.1.0 shows "available when Connect ≥ 0.4.0"; Connect lead: tell Fleet the real version.
+
+## kanban: scope grants for instances created after first sight (LATER, Q-KB1)
+- Need: an app creates a scope instance on an agent's behalf after that agent's first sight (e.g. Kanban `project_create` by an agent); today the creator gets no access (`ScopeStore.set` is person-only, defaultGrants apply once per (agent, type)).
+- Ask: `instances.create(type, id, label, { ownerAgent })` applies the scope's `own` default level to `ownerAgent` when the instance is new (audited as system). Also `instances.delete(type, id)` (drops its grants) for app-side deletes (Q-KB3).
+- Not blocking Kanban 0.1 (Coordinator: 0.1 = own project + owner-shared projects).

@@ -526,6 +526,12 @@ export interface ReleaseIndexBody {
   harnesses: HarnessOption[];
   offers: unknown[];
 }
+/** v0.1.12 (C79): Core's signing key ring, public halves only, plus the seq of the key-set statement Core emits.
+ *  Ceremony INPUT for Platform (keyset-request.json). NOT a trust path: verifiers never read it (trust = root-signed statement only). */
+export interface PortalSigningKeys {
+  keys: { jwk: Ed25519PublicJwk; status: "pending" | "active" | "retired"; activateAt: IsoTime }[];
+  keySetSeq: number | null;
+}
 export interface ReleaseListInput { product: ProductId; channel?: "stable" | "dev" }
 export interface ReleaseList { items: Release[] }
 export interface Offer extends OfferSummary { livemode: boolean; verifiedAt: IsoTime }
@@ -828,7 +834,7 @@ export interface SchemaMap {
   TicketResult: TicketResult;
   Licence: Licence; LicenceListInput: LicenceListInput; LicenceList: LicenceList; LicenceRef: LicenceRef;
   LicenceTargetInput: LicenceTargetInput; LicenceChange: LicenceChange; CheckoutInput: CheckoutInput; Checkout: Checkout; BillingPortalInput: BillingPortalInput; BillingPortalSession: BillingPortalSession;
-  OrderRef: OrderRef; Order: Order; UnpaidCount: UnpaidCount; StripeEvent: StripeEvent; WebhookAck: WebhookAck; ClerkEvent: ClerkEvent;
+  OrderRef: OrderRef; Order: Order; UnpaidCount: UnpaidCount; StripeEvent: StripeEvent; WebhookAck: WebhookAck; PortalSigningKeys: PortalSigningKeys; ClerkEvent: ClerkEvent;
   SkillsInput: SkillsInput; SkillBundle: SkillBundle; SkillOverrideInput: SkillOverrideInput; SkillKeyRef: SkillKeyRef;
   SkillFile: SkillFile; ZipFile: ZipFile; DesktopDownload: DesktopDownload;
   OwnerSessionList: OwnerSessionList; OwnerSessionRef: OwnerSessionRef;
@@ -984,6 +990,8 @@ export const ROUTES = [
 
   // downloads
   { opId: "downloads.desktop", method: "GET", path: "/downloads/desktop", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "DesktopDownload", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "release" },
+  /** v0.1.12 (C79): public, read-only ceremony input; never a trust path. */
+  { opId: "portal.signing_keys", method: "GET", path: "/portal/signing-keys", auth: ["public"], exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "PortalSigningKeys", rate: "public_strict", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "credential" },
 
   // owner native sessions (K3)
   { opId: "owner_sessions.list", method: "GET", path: "/owner-sessions", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "OwnerSessionList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "credential" },

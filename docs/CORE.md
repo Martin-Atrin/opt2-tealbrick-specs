@@ -2,6 +2,11 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.11 → v0.1.12 (C63a fallback removal; C79)
+- **Core emits `portalKeySet` since 2026-10-12T10:19:19Z** (Core 229e465, statement seq 1). From spec 0.1.12 the no-statement fallback (CREDENTIALS §9.5 rule c) is REMOVED: a build that pins Portal Root Keys for its channel refuses an enrolment response, config or slice without a valid root-signed statement, first-contact included (`keyset_missing`). SDK `KEYSET_REQUIRED = true` (miniapp-sdk 0.1.12); bridge from 0.1.13; conformance 0.1.8 runs the strict checks (`A13.kss_first_missing`, `B20.kss_enrol_missing`) by default with `--test-roots`.
+- C79: route `portal.signing_keys` (GET /portal/signing-keys, public, `public_strict`): Core's public key ring + emitted statement seq — ceremony input only, never a trust path.
+- Spine S1 claim guard (SDK-API §13 v0.1.12 addition): SdkEnv `TB_DATA_EPHEMERAL?` (tests/conformance only), Health `attention?: AttentionCode` (`data_dir_not_mounted` | `identity_refused`; wire readiness `degraded`), reclaim with a NEW enrolment code after a 401 identity refusal; CONFORMANCE `A1.reclaim_on_new_code`. The mount gate's enforce vs log-only mode is pending Core's Railway mountinfo reading (C-relay 2026-10-12).
+
 ## Changelog v0.1.10 → v0.1.11
 - StatusReport `portalKeysDigest?` and `apps[].sliceRevision?` (Bridge 0.1.12 sends them; Core consumes them). (C62/C63, BSD-07, C70)
 - C62/C63 (BSD-08) offline Portal Root Keys: two root keys (dev pair now, production pair at the cutover ceremony) pinned as release data (`PORTAL_ROOT_KEYS`, credentials.ts) sign key-set statements (`tb-keyset+jws`, monotonic `seq`); config, slice and enrolment response carry the current statement as `portalKeySet`; trusted Portal keys come ONLY from the newest root-signed statement; `portalKeys` informational for one minor; `keySetAnnounce` leaves the trust path (§4, CREDENTIALS §9.5, BRIDGE §4–5, SDK-API §9; manifest 0.1.6, miniapp-sdk 0.1.11, conformance 0.1.7).

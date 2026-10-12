@@ -402,3 +402,6 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 
 ## v0.1.11 addition (C71)
 - The release index body is spec: `ReleaseIndexBody` / `ReleaseIndexEntry` / `ReleaseSourceRecord` / `BridgeRuntimeRecord` in types/routes.ts. Dev source records carry optional `context` (repo-relative build root, default "."; for apps it MUST equal the manifest `runtime.build` root); Core builds with Railway rootDirectory = `context`. Platform's registry README stays the operational guide; on a conflict the types win.
+
+## v0.1.12 addition (C79)
+- Route `portal.signing_keys` (`GET /portal/signing-keys`, auth `public`, rate `public_strict`, `bodyLog: meta`, registry Credential): `PortalSigningKeys {keys: [{jwk, status, activateAt}], keySetSeq}` — Core's signing key ring (public halves only) and the seq of the statement it emits. Ceremony input for Platform; verifiers never read it. Explicit public rows are now six (add `portal.signing_keys`).

@@ -299,3 +299,6 @@ None. (Key connections without a refresh token: accepted, C15.)
 
 ## v0.1.11 additions (C62/C63)
 - `TYP.keySet = tb-keyset+jws`, `KeySetStatementClaims`, `KEYSET_REFUSAL`, `PORTAL_ROOT_KEYS {dev, prod}` (dev = Platform e19cf98 root-a/root-b, prod empty until cutover) — §9.5. Root keys and key-set statements are not credential kinds. `keySetAnnounce` is no longer a trust path (deprecated export for one minor).
+
+## v0.1.12 (fallback removed, 2026-10-12T10:19:19Z)
+- Rule (c) of §9.5 is removed: Core emits `portalKeySet` since 2026-10-12T10:19:19Z. Every build that pins Portal Root Keys for its channel refuses a statement-less enrolment response, config or slice, including the first one. `portal.signing_keys` (PORTAL-API) publishes Core's public key ring for the ceremony and is never a trust input.

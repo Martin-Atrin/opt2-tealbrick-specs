@@ -509,6 +509,8 @@ export interface SdkEnv {
   TB_STANDALONE_RESET?: "1";
   TB_RESTORE_FROM?: string;
   TB_LOG_LEVEL?: "error" | "warn" | "info" | "debug";
+  /** v0.1.12: tests / conformance runners ONLY; "1" skips the first-claim mount check of TB_DATA_DIR */
+  TB_DATA_EPHEMERAL?: "1";
 }
 
 // ── Receipts and holds (one table) ──
@@ -614,7 +616,11 @@ export interface Health {
   version: string;
   manifestDigest: Sha256Digest;
   keys: KeyStatus[];
+  /** v0.1.12: present only while the instance needs the owner (status `needs_claim`; wire readiness `degraded`) */
+  attention?: AttentionCode;
 }
+/** v0.1.12 claim guard: data dir not on a mounted volume, or the bridge refused the stored identity (same code). */
+export type AttentionCode = "data_dir_not_mounted" | "identity_refused";
 /** Status push body = AppStatus (bridge.ts); the SDK fills `pendingHolds` = count of held receipts (C16 S2). */
 
 // ── Audit ──
@@ -682,7 +688,7 @@ export interface SessionInfo {
 
 // ── tb-exec (companion containers; C2, C6) ──
 export declare const TB_EXEC_CONTROL_PORT: 7077;
-/** CLI: `tb-exec -- <upstream command...>`; env: TB_INSTANCE_ID, TB_SERVICE, TB_ENROL_CODE, TB_BRIDGE_URL, TB_PORTAL_KEYS, TB_KEK, TB_DATA_DIR, TB_LOG_LEVEL. */
+/** CLI: `tb-exec -- <upstream command...>`; env: TB_INSTANCE_ID, TB_SERVICE, TB_ENROL_CODE, TB_BRIDGE_URL, TB_PORTAL_KEYS, TB_KEK, TB_DATA_DIR, TB_LOG_LEVEL (TB_DATA_EPHEMERAL in tests only). */
 export interface TbExecControl {
   "POST /tb/v1/exec/backup": { request: Record<string, never>; response: "application/octet-stream" };
   "POST /tb/v1/exec/restore": { request: "application/octet-stream"; response: { ok: true } };
