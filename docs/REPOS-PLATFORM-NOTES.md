@@ -4,7 +4,7 @@ Created 2026-10-11 by Lead · Platform. All PUBLIC under GitHub user Martin-Atri
 Each repo: README (opt2 status + no-secrets policy), `.gitignore` (blocks .env*, keys, build output), `.woodpecker/secret-scan.yaml` (gitleaks on push/PR), `.pre-commit-config.yaml` (optional local gitleaks). GitHub secret scanning + push protection: enabled on all 12.
 Final split stays Lead · Specs's call in `specs/REPOS.md`; Platform creates any extra repo on request (append to `specs/REQUESTS.md`).
 
-Local working trees: `/Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-<name>` (one convention: folder = repo name).
+Local working trees: `<workspace>/opt2-tealbrick-<name>` (one convention: folder = repo name).
 
 | Repo | URL | Owner lane | Local folder state |
 |---|---|---|---|
@@ -34,7 +34,7 @@ Remote `main` of every repo holds one initial commit (README, .gitignore, secret
 - Adopted on main (2026-10-11 ~19:45): specs, sdk, qa, packages, platform, bridge, connect. NOT yet: knowledge, portal-core, portal-gui, website, tbd.
 - Woodpecker is LIVE for all 12 repos (2026-10-11 ~20:20): every push to main and every PR runs the pipeline. Fork PRs need approval.
 - Lead to adopt (repo already has lead commits; Platform did not touch it): knowledge, connect, bridge, portal-core, portal-gui, website, tbd. Command:
-  `cd /Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-platform && node ci/tb-ci.ts adopt ../opt2-tealbrick-<name> --kind <miniapp|bridge|portal|web|desktop>` then edit `tealbrick-ci.json` (images, paths) and commit. It deletes `.woodpecker/secret-scan.yaml` (the template has that step).
+  `cd <workspace>/opt2-tealbrick-platform && node ci/tb-ci.ts adopt ../opt2-tealbrick-<name> --kind <miniapp|bridge|portal|web|desktop>` then edit `tealbrick-ci.json` (images, paths) and commit. It deletes `.woodpecker/secret-scan.yaml` (the template has that step).
 - Package rules: `"private": true` everywhere, lockfile committed, root scripts `typecheck lint test` (+ `conformance` for miniapp/bridge, + `build` in pnpm workspaces); no `tealbrick`/`@tealbrick/*` deps.
 - Local check before pushing: `CI_WORKSPACE=$PWD TB_CI_REF=ci-v2 node ../opt2-tealbrick-platform/ci/tb-ci.ts setup` in your repo.
 - Images: `ghcr.io/martin-atrin/opt2-tealbrick-<name>[-<component>]`, public. No npm publishing; cross-repo packages = GitHub release tarball URLs (REPOS.md §5).
@@ -42,7 +42,7 @@ Remote `main` of every repo holds one initial commit (README, .gitignore, secret
 ## Deploying to Railway "opt2" (C32) — every lead
 - Standard path: Railway builds the service from its PUBLIC GitHub repo at a PUSHED commit SHA (no Railway GitHub app needed). One command from the platform tree:
   ```sh
-  cd /Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-platform
+  cd <workspace>/opt2-tealbrick-platform
   node ops/railway-deploy.ts --service <portal-core|portal-gui|website> --repo opt2-tealbrick-<name> --sha <full 40-char sha on origin/main> [--dockerfile <path>] [--root <dir>]
   ```
   It refuses a SHA that is not on GitHub, sets `RAILWAY_DOCKERFILE_PATH`, points the service source at the repo and deploys exactly that commit (`serviceInstanceDeployV2(commitSha)`). Record the SHA in your STATUS deploy note. Verified 2026-10-11 on service db-backup (platform@ac202e3, build SUCCESS).

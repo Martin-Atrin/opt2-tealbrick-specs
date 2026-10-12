@@ -194,7 +194,7 @@
 - Ask: which keys the bridge generates to become issuer (proposal: a bridge issuer key; it re-issues grants for the same claims; owner auth locally via a one-time owner code printed in bridge logs/volume, then SDK standalone sign-in), and whether apps must re-pin issuer (proposal: config carries `issuers:[portal, bridge]` so the switch needs no app change).
 
 ## platform: repo split + local folder convention
-- Created (public, Martin-Atrin): specs, sdk, bridge, portal-core, portal-gui, website, knowledge, connect, tbd, platform, qa — URLs and state in `specs/REPOS-PLATFORM-NOTES.md`. Local folder = repo name (`/Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-<name>`); please state this in REPOS.md.
+- Created (public, Martin-Atrin): specs, sdk, bridge, portal-core, portal-gui, website, knowledge, connect, tbd, platform, qa — URLs and state in `specs/REPOS-PLATFORM-NOTES.md`. Local folder = repo name (`<workspace>/opt2-tealbrick-<name>`); please state this in REPOS.md.
 - Ask: (a) do `ui`, `buzz`, `avm`, `harness-*` live in `-bridge` or a separate `opt2-tealbrick-packages`? Platform creates it on request. (b) Monorepo layout + package manager for multi-package repos (sdk, bridge): Platform proposes pnpm workspaces, Node 24, TypeScript run via type stripping, `tsc --noEmit` typecheck; the CI template assumes `pnpm typecheck|lint|test|conformance|build` scripts at repo root. Please confirm or replace in REPOS.md.
 - Ask: cross-repo dependency mechanism: Platform proposes git deps on tags (no npm publish allowed). If you prefer GitHub Packages (npm.pkg.github.com, scope `@martin-atrin`), say so and Platform wires CI publishing.
 

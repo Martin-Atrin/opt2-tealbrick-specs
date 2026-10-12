@@ -4,7 +4,7 @@ Status: v0.1, Lead · Specs, 2026-10-11 (agreed inputs from Lead · Platform: `R
 
 ## 1. Rules
 - Every repo is PUBLIC under GitHub user **Martin-Atrin**, named `opt2-tealbrick-<name>`. Never the Tealbrick org (migration there is one clean commit at release). Never push to v1 repos.
-- Local working tree = repo name: `/Users/puma/work/active/tealbrick-opt2/opt2-tealbrick-<name>` (one tree per repo). Existing short folders (`sdk/`, `bridge/`, …) are renamed or removed by their owner lane before first push.
+- Local working tree = repo name: `<workspace>/opt2-tealbrick-<name>` (one tree per repo; `<workspace>` is your local folder for the repos). Existing short folders (`sdk/`, `bridge/`, …) are renamed or removed by their owner lane before first push.
 - No secrets, no personal data, no home-infrastructure names in any repo (secret scan in CI; GitHub push protection on).
 - TypeScript only (Node 24+, type stripping for scripts/tests; `tsc --noEmit` typecheck). Exceptions: Swift in `-tbd` (macOS app); config files a tool requires as JS. No `.js`/`.mjs` sources.
 - No vendored upstream code (GBrain, Open Notebook: pinned images by digest), no committed build output, no inline third-party specs (the Connect catalog is a sha256-pinned release artifact).
