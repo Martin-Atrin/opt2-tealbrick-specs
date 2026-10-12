@@ -612,6 +612,10 @@
               }
             }
           }
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "v0.1.24 (C117): owner switch; false = skipped; absent = true. Core lists every declared hook of every deployed app."
         }
       }
     },

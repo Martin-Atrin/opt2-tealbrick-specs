@@ -446,3 +446,6 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 - `DeployState` += `refused` (bridge refused the manifest; the app never ran) — `Instance.lastError.code` = `ErrorCode | BridgeManifestRefusalCode` (`manifest_mismatch`, `bridge_too_old`, a validator code, `manifest_rejected`).
 - `CatalogEntry.devOnly?: true` for a dev-only app still running in a stable workspace (entry from its running release, no offers, no update).
 - StatusReport `rejected[].ins?` (BRIDGE v0.1.22) — Core no longer infers the instance.
+
+## v0.1.24 additions (C117)
+- `hookSubscriptions` / config `hooks[]`: every declared hook of every DEPLOYED app (any run state, also after a licence lapse) with `enabled` = the owner switch (`hooks.set`). A hook disappears only when the owner switches it off (then listed `enabled: false`) or removes the app. Every change that can affect the list bumps the config revision.

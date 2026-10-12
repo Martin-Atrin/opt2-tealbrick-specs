@@ -686,3 +686,5 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 4. **Items whose tags are unknown.** Engine recall rows that are not canonical documents (pages written straight into GBrain) carry `tags: []` without a narrowing and are DROPPED under any narrowing (also `noneOf` only), because their real tags are unknown. A hidden document answers `not_found` on get/revisions/comments/links (like a walled area). Writes ignore the narrowing.
 
 ## specs: DECIDED (G5, spec 0.1.22) — tags compare after trim + lower case (`normalizeTag` / `tagsMatch` in @opt2-tealbrick/manifest 0.1.15; Rules and Knowledge import them); Knowledge's points 2–4 are blessed as written (SDK-API §18 v0.1.22). Core rows typed in spec 0.1.22: `DeployState` `refused`, `BridgeManifestRefusalCode` for lastError, `CatalogEntry.devOnly`, `rejected[].ins`.
+
+## specs: DECIDED (C116, spec 0.1.24) — StatusReport rejected kind `config` code `standalone_without_grants` (BRIDGE v0.1.24); bridge 0.1.21 emits it. No type change needed (code is a string); documented in types/bridge.ts.

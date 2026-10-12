@@ -163,6 +163,9 @@ export interface HookEntry {
   /** 100..2000 */
   timeoutMs: number;
   match: HookMatch;
+  /** v0.1.24 (C117): the owner switch. Core lists EVERY declared hook of every deployed app (whatever its run state or
+   *  licence); `false` = the owner switched it off → the bridge skips it. Absent (older Core) = true. */
+  enabled?: boolean;
 }
 export interface SkillsBundle {
   digest: Sha256Digest;
@@ -290,7 +293,8 @@ export interface StatusReport {
   connectionsCreated: { con: ConnectionId; agt: AgentId; method: "pairing"; clientName: string; createdAt: IsoTime; pairingJti: Ulid }[];
   connectionsRevoked: { con: ConnectionId; reason: "refresh_reuse" | "client_revoke" }[];
   claims: ClaimRecord[];
-  /** v0.1.14 (L3): `bridge_op` = a failed catalog / resolve / mark / scope_summary call to an app (code = the app's refusal or transport error).
+  /** v0.1.24 (C116): kind `config` + code `standalone_without_grants` = the final standalone document carries no agent grants (applied, fail closed).
+   *  v0.1.14 (L3): `bridge_op` = a failed catalog / resolve / mark / scope_summary call to an app (code = the app's refusal or transport error).
    *  v0.1.17 (L3, C104): `manifest` = an app manifest the bridge refused (code = the refusal, e.g. `manifest_mismatch`, a validator code, `bridge_too_old`) */
   rejected: {
     kind: "config" | "grant" | "slice" | "assertion" | "ticket" | "pairing" | "claim" | "bridge_op" | "manifest";

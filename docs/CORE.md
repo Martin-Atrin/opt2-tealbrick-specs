@@ -2,6 +2,10 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.23 → v0.1.24 (C117, C116)
+- C117: a hook leaves the gate ONLY by explicit owner action (switch it off, remove the app) — never by run state (queued, deploying, unhealthy), an update, a licence lapse or a missing config bump. Core lists every declared hook of every deployed app in config `hooks[]` with `enabled` (owner switch) and bumps the config on every change that can affect the list; the bridge fails closed (`hook_failed`) for a matching declared hook that is absent or whose app is down (BRIDGE v0.1.24). Licence lapse keeps the hook listed (the app stops → calls fail closed with a plain "licence lapsed" reason; the owner removes the app to unblock).
+- C116: StatusReport rejected kind `config` code `standalone_without_grants`.
+
 ## Changelog v0.1.22 → v0.1.23 (C115, security correction)
 - `rules.narrowing.memoryTags.anyOf` present but EMPTY passes nothing (was read as "no constraint" in 0.1.22, which widened access, L13). Fixed in `tagsMatch` (manifest 0.1.16); manifest 0.1.15's `tagsMatch` must not be used.
 

@@ -131,7 +131,7 @@ Build the full routing table (agents, connections, instance keys, tools per agen
 | `grants[]` | agent→app grants (K10 compact JWS); mode, held, caps, wf live only in the grant | attached on forward |
 | `apps[]` | every deployed instance: `{ins, product, version, sdkMajor, manifestDigest, internalUrl, ownInfra?, entitled, slice}` (`internalUrl` rule: §5.7) (`slice` = `tb-slice+jws`) | routing, manifest fetch, slice relay; `entitled` is informational (status/display), never a bridge decision |
 | `agents[]` | `{agt, name, mode}` | tools/list, skill variables |
-| `hooks[]` | resolved active chain `{id, ins, product, hookId, phase, order, timeoutMs, match{products, operations?, effects?}}` — only deployed, licensed, owner-enabled subscriptions | §8.2 |
+| `hooks[]` | `{id, ins, product, hookId, phase, order, timeoutMs, match{products, operations?, effects?}, enabled?}` — v0.1.24 (C117): EVERY declared hook of every deployed app, `enabled` = owner switch (absent = true) | §8.2 |
 | `skills` | `{digest, files[{product, id, title, when?, content}]}` rendered by Core with `renderSkill()` (settings/scope variables filled; `{{agent.*}}` left for the bridge) | §7.4 |
 | `keyRequirements[]` | `{name, label, provider?, ins, product, required, source, usedBy[]}` with `when` resolved by Core against settings | key page, key fetch, presence booleans |
 | `enrolCodes[]` | pending K6 digests `{digest, kind: instance\|service\|neighbour, ins, product?, service?, exp}` | §10 |
@@ -385,3 +385,11 @@ None open for the bridge after C15/C16 and CORE §14. Settled items recorded for
 - **v0.1.17 (C107 decision):** a dynamic `resolve` answer whose effect is `outward` or `money` and that carries no `holdFamily` is refused with `dynamic_resolve_failed` and `details.reason: "family_missing"`; the op is not called (conformance `B16.resolve_family`).
 - **v0.1.21 (L1, Bridge request):** `tools/list` per agent = the ops for which `opVisibleToGrant(op, grantClaims, declaredScopeTypes)` holds (@opt2-tealbrick/manifest 0.1.14; the static part of gate() steps 3–4, built on `opInGrantWorkflow`, which gate() itself uses). The bridge keeps no local copy of the workflow / crud / audience rule.
 - **v0.1.22:** StatusReport `rejected[].ins?` = the app instance concerned (kind `manifest` always; `bridge_op` when known).
+- **v0.1.24 (C116; bridge 0.1.21 emits it):** StatusReport `rejected[]` kind `config`, code `standalone_without_grants` = the FINAL standalone document lists agents and apps but carries no agent grants. The bridge still applies it (fail closed: no grant → no tool) and reports it (count only, no `ins`). Root cause QA J2-15: Core minted the final doc with grantable=false (fixed in Core 1195b75).
+
+## v0.1.24 (C117, S1 fail-open: Rules hooks dropped after an update)
+- Config `hooks[]` lists EVERY declared hook of every deployed app with `enabled: boolean` (owner switch). Chain building (§8.1 steps 6, 7, 12): for a routed call, the bridge takes the hooks DECLARED in the manifests of the deployed apps it routes (manifest `hooks[]` + `match`) and, for each one that matches the call:
+  - present in `config.hooks` with `enabled: false` → skipped (owner choice);
+  - present and enabled (or `enabled` absent) → run as today;
+  - ABSENT from `config.hooks`, or its app is down / unreachable / not claimed → the call is refused `hook_failed` (fail closed; message names the hook and "not active" / "app unavailable"). Never forwarded without it.
+- A hook therefore leaves the gate only by an explicit owner action (switch off, remove the app), never because of a run state, an update in progress, a licence lapse or a missing config bump.
