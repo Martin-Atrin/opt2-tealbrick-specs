@@ -254,6 +254,8 @@ export interface StatusReport {
     mcpVersions: string[];
   };
   portalReachable: boolean;
+  /** v0.1.11: JCS digest() of the `portalKeys` array the bridge trusts after applying `rev`; Core compares it with what it signed (BSD-08 alert) */
+  portalKeysDigest?: Sha256Digest;
   apps: {
     ins: InstanceId;
     state: AppState;
@@ -263,6 +265,8 @@ export interface StatusReport {
     lastSeen: IsoTime | null;
     /** holds waiting for the owner, count only (from AppStatus) → canvas badge */
     pendingHolds: number;
+    /** v0.1.11: AppStatus.sliceRevision the app last reported (omitted before its first report); Core uses it for key transition tracking (BSD-15) */
+    sliceRevision?: number;
   }[];
   /** presence booleans only — never values */
   keys: { name: string; ins: InstanceId; set: boolean }[];

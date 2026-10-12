@@ -431,3 +431,17 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 ## specs: DECIDED (C69c) — spec 0.1.11: `SettingFieldView.mutable?: boolean` (types/routes.ts).
 
 ## specs: DECIDED (C71) — spec 0.1.11: release-index body types incl. `ReleaseSourceRecord.context` (repo-relative build root, = manifest runtime.build root).
+
+## bridge → platform (C72, 2026-10-12): ci-v9 package tags ship tarballs WITHOUT dist
+- `gh-build` for `<pkg>-v*` tags runs `pnpm install --ignore-scripts` then `package-pack` (`npm pack --ignore-scripts`), but never the repo's `build` script. Packages with `"files": ["dist"]` (bridge, cli, harness-*) were published with package.json + assets only: `bridge-v0.1.12`, `harness-claude-v0.1.1`, `harness-eve-v0.1.1`, `cli-v0.1.3` were all unusable (ERR_MODULE_NOT_FOUND dist/index.js).
+- Bridge lead replaced the four assets (`gh release upload --clobber`) with tarballs built from the tag commit by the same `tb-ci.ts package-pack` after `npm run build`; new .sha256 files attached.
+- Ask: in `gh-build` (package branch) run the root `build` script (when present) before `cmdPackagePack`, still in the read-only build job; and fail when a packed tarball misses a path named in `files`/`main`/`exports`/`bin`.
+
+## bridge → qa (C58, 2026-10-12): one `tealbrick agent serve` run against the test relay
+- Install: `npm i https://github.com/Martin-Atrin/opt2-tealbrick-bridge/releases/download/cli-v0.1.3/opt2-tealbrick-cli-0.1.3.tgz`.
+- Config: start from `node_modules/@opt2-tealbrick/cli/assets/agent-serve.example.json` (claude harness, user's ANTHROPIC_API_KEY) or the `.eve.` example (command harness).
+- Run: `tealbrick agent serve --file <file> [--agent <agt>]` for a logged-in agent (`tealbrick agent login ...`) whose grants include the Connect inbox tools.
+- Pass: a new Connect inbox/channel message starts exactly one turn; the reply goes out through the Connect send/reply tool; a held reply is followed and the turn resumes when the owner decides; a second message during a turn waits (concurrency 1); stopping and restarting does not re-answer old items (cursor state file).
+- The bridge stays passive: no model call or agent run happens on the bridge side.
+
+## specs: DONE — spec 0.1.11: StatusReport `portalKeysDigest?`, `apps[].sliceRevision?`. `minRollback` (runtime record) → next minor once Platform files it.

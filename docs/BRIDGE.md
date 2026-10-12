@@ -348,3 +348,8 @@ None open for the bridge after C15/C16 and CORE §14. Settled items recorded for
 - `apps[].internalUrl` private-network forms + `ownInfra` + bridge-local `TB_OWN_INFRA_ORIGINS` (§5.7); refuse code `internal_url_refused` (§8.4). Replaces the interim `TB_APP_HOSTS` name.
 - C70: refuse code `grant_stale` (§8.4).
 - C63a: the no-statement fallback applies only while nothing is pinned (never at re-enrolment of a bridge with a pinned statement, §4.3) and is removed in spec 0.1.12 (a dev/stable build then refuses a first `EnrolResponse` without a valid `portalKeySet`).
+
+## v0.1.11 addition (StatusReport, Bridge + Core request)
+- `StatusReport.portalKeysDigest?` = JCS `digest()` of the `portalKeys` array the bridge trusts after applying `rev` (Core compares it with the set it signed for that revision: mismatch → error log + alert, BSD-08 short term).
+- `StatusReport.apps[].sliceRevision?` = the `AppStatus.sliceRevision` the app last reported (omitted before its first report; Core uses it to see an instance has moved to a transition key, BSD-15).
+- Both optional and additive. (`minRollback` on runtime records is not filed yet → next minor.)

@@ -2,7 +2,8 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
-## Changelog v0.1.10 → v0.1.11 (C62/C63, BSD-07, C70)
+## Changelog v0.1.10 → v0.1.11
+- StatusReport `portalKeysDigest?` and `apps[].sliceRevision?` (Bridge 0.1.12 sends them; Core consumes them). (C62/C63, BSD-07, C70)
 - C62/C63 (BSD-08) offline Portal Root Keys: two root keys (dev pair now, production pair at the cutover ceremony) pinned as release data (`PORTAL_ROOT_KEYS`, credentials.ts) sign key-set statements (`tb-keyset+jws`, monotonic `seq`); config, slice and enrolment response carry the current statement as `portalKeySet`; trusted Portal keys come ONLY from the newest root-signed statement; `portalKeys` informational for one minor; `keySetAnnounce` leaves the trust path (§4, CREDENTIALS §9.5, BRIDGE §4–5, SDK-API §9; manifest 0.1.6, miniapp-sdk 0.1.11, conformance 0.1.7).
 - BSD-07: `apps[].internalUrl` = `http://<name>.railway.internal:<port>`, or any http(s) origin only with `ownInfra: true` AND listed in the bridge-local env `TB_OWN_INFRA_ORIGINS` (never set by Portal); same rule for neighbour claims; refuse code `internal_url_refused` (BRIDGE §5.7).
 - C70: bridge refuse code `grant_stale` (BRIDGE §8.4); CONFORMANCE A12 companion calls; MANIFEST path bases (build paths repo-relative, skill/app files manifest-relative).
