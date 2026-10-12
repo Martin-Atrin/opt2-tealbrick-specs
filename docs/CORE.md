@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.6 → v0.1.7 (C53, C54)
+- `runtime.services[].dropPrivileges` (default false; tb-exec drops only when true; the app always drops); `SessionInfo.idempotencyRequired`; SDK-API §15 one Dockerfile pattern (C53/BSA-06).
+
 ## Changelog v0.1.4 → v0.1.6 (C50, C52)
 - C50 `app_not_claimed` (0.1.5); C52 BRIDGE §9.3: keys-ticket POST answered with the form directly (200 + Strict cookie, no 303), conformance `B11.ticket_post_is_form` (0.1.6).
 

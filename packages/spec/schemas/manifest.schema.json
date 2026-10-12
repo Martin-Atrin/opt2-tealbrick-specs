@@ -176,6 +176,7 @@
         "env": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/envEntry" } },
         "when": { "$ref": "#/$defs/condition" },
         "startOrder": { "type": "integer", "minimum": 0, "maximum": 99 },
+        "dropPrivileges": { "type": "boolean", "default": false },
         "backup": {
           "type": "object",
           "additionalProperties": false,

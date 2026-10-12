@@ -153,6 +153,8 @@ interface ServiceBase {
   env?: EnvEntry[];
   when?: Condition;
   startOrder: number;
+  /** v0.1.7 (C54): tb-exec drops to uid/gid 1000 before starting the upstream only when true (default false: upstream images that manage their own users, e.g. Postgres, keep doing so). The app process always drops (SDK startApp). */
+  dropPrivileges?: boolean;
   backup?: ServiceBackup;
   helper?: ServiceHelper;
 }

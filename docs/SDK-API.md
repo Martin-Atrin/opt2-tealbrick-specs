@@ -246,10 +246,19 @@ The listen port is manifest `runtime.port`; backup schedule and retention are ma
 | `src/app.ts`, `src/main.ts` | `defineApp` with a typed handler stub per op; `main.ts` = `startApp(app, process.env)` |
 | `src/ui/` | React app using `<TbProvider>` + `<AppShell>`; built to `dist/ui` |
 | `migrations/0001_init.sql`, `skills/<id>/SKILL.md` | baseline + one skill file |
-| `Dockerfile` | `node:24-slim@sha256`, non-root, `CMD ["node", "dist/main.js"]`; services: `FROM <upstream>@sha256` + `tb-exec` layer |
+| `Dockerfile` | THE one app Dockerfile pattern (C53/BSA-06; Knowledge and Connect follow it) — see §15.1 |
 | `.woodpecker.yaml` | includes the ONE pipeline template from `opt2-tealbrick-platform` (typecheck, lint, unit, conformance, build image, publish, release record); no repo-local pipeline logic |
 | `package.json` | `@opt2-tealbrick/*` deps as GitHub-release tarball URLs (REPOS §5); scripts `typecheck lint test conformance build gen` |
 Generated (never hand-written, not committed): `tb-gen openapi | kit | docs | railway`. The per-app kit (`<product>-kit`: op id constants, input/output types from the manifest schemas, skill texts, a typed client over the bridge MCP tools) is built by CI and attached to the app's GitHub release as a tarball. `tb-gen railway` renders a self-host Railway template from the manifest (incl. the backup volume); Portal deploys use Core's recipe generated from the same manifest. Conformance drift check: generated output equals the manifest.
+
+### 15.1 The one Dockerfile pattern (C53/BSA-06, v0.1.7)
+1. Build stage `node:24-slim@sha256:<pinned>`: `corepack enable`; `pnpm install --frozen-lockfile`; `tb-gen kit` (types come from the generated kit, BSA-12); `tsc -p tsconfig.build.json` → `dist/`; UI build → `dist/ui`.
+2. Runtime stage: the same pinned `node:24-slim@sha256`; production deps only (`pnpm install --prod --frozen-lockfile`); copy `dist/` and `migrations/`, `skills/`.
+3. Manifest copied to `/opt/tb/tealbrick.manifest.json` (read by the SDK and `tb-exec --manifest`).
+4. Data under `/data` (`TB_DATA_DIR=/data`, `TB_BACKUP_DIR=/data/backup`, C28); one volume per service.
+5. `USER node`; `CMD ["node", "dist/main.js"]`. If the platform starts the container as root (Railway volume mounts, C38), `startApp` chowns `TB_DATA_DIR` and drops to uid/gid 1000 before opening anything (BSA-05).
+6. Companion services: `FROM <upstream>@sha256` + Node + `@opt2-tealbrick/miniapp-sdk` (`tb-exec`); `ENTRYPOINT ["tb-exec", "--manifest", "/opt/tb/tealbrick.manifest.json", "--"]`, `CMD` = the upstream command. `tb-exec` drops to 1000 only when the service sets `dropPrivileges: true` (C54).
+No npm, no `node src/main.ts` in images, no hand-written types mirroring the manifest.
 
 ## 16. Versioning
 SDK semver. Portal and the bridge support the current SDK major and the one before (manifest `sdkMajor`; claim reports the exact `sdk` version); an older major is refused `sdk_major_unsupported`. The wire paths stay `/tb/v1/…` across SDK majors; a breaking wire change requires a new SDK major and is supported by the bridge for that major and the previous one. The client package and `@opt2-tealbrick/ui` are versioned with the SDK.
@@ -289,3 +298,7 @@ None open. Resolved at v0.1: the scope summary is the bridge op `scope_summary` 
 - SDK 0.x counts as manifest `sdkMajor` 1 until SDK 1.0.
 - `TB_KEK`: exactly 32 bytes, base64url (43 chars) or hex (64 chars); KEK id = non-secret fingerprint `kek_<16 hex>`. Grant failures use `grant_invalid | grant_expired | grant_revoked`; other token failures `invalid_token`. Backup/export failures: `backup_failed`, `export_failed`. App tables export as `tables/<name>.jsonl`.
 - `onStart`, `ctx.publicUrl`, `ctx.workspace`, `ctx.scopes.instances`, `ctx.secrets` are now in types/sdk.ts (C31/C33).
+
+## v0.1.7 additions (C53, C54)
+- BSA-05/C54: ONE privilege drop (`dropPrivileges` in the SDK): `startApp` always drops to uid/gid 1000 when started as root (chown `TB_DATA_DIR`, and `TB_BACKUP_DIR` if outside it, then setgid/setuid; failure → `privilege_drop_failed`); `tb-exec` drops only when `runtime.services[].dropPrivileges: true`.
+- BSA-12: `SessionInfo.idempotencyRequired` (person-audience op ids with `idempotency: required`); client `callOp` adds a fresh key for them unless the caller passes one; retrying the same logical call with the same key is the caller's job.

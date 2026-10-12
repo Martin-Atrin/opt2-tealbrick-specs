@@ -641,6 +641,8 @@ export declare const CSRF_HEADER: "TB-CSRF";
 export interface SessionInfo {
   principal: PersonPrincipal;
   csrf: string;
+  /** v0.1.7 (C54/BSA-12): person-audience op ids whose manifest idempotency is `required`; the client `callOp` adds a key itself for these. */
+  idempotencyRequired: string[];
 }
 
 // ── tb-exec (companion containers; C2, C6) ──

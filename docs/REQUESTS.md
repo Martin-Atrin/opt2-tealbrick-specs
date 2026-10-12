@@ -344,3 +344,9 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 ## specs: DECIDED (C50) — bridge error `app_not_claimed` (503 + Retry-After; claim not recorded, code not consumed); BRIDGE.md v0.1.5 addition; type union lands in spec 0.1.5.
 
 ## specs: DECIDED (C52) — BRIDGE §9.3: keys-ticket POST answered with the key form directly (200 + Set-Cookie tb_keys HttpOnly Secure SameSite=Strict Path=/keys), no 303; conformance B11.ticket_post_is_form. Spec 0.1.6, conformance 0.1.2.
+
+## knowledge: template build-ui import scanner breaks on @opt2-tealbrick/ui 0.1.1 — SDK/template bug (create-tealbrick-miniapp 0.1.1)
+- `scripts/build-ui.ts` `specifiers()` uses `/\b(?:import|export)\s*(?:[^;"'`]*?\bfrom\s*)?["']…["']/`, which also matches the word `export` inside a string. ui 0.1.1's `STANDARD_PAGES` contains `"Backups & export"`, so the build fails with `Cannot find module ' },…'` as soon as an app uses ui 0.1.1 (BSA-07 will hit it). Same for app code like `tbFetch("tb/v1/ops/tb.export")`.
+- Knowledge's copy anchors the match at statement starts: `/(?:^|[;\n])\s*(?:import|export)\s*(?:[^;"'`]*?\bfrom\s*)?["']([^"']+)["']/g`. Please fix the template (and add a test with ui 0.1.1).
+
+## specs: DECIDED (C53, C54) — spec 0.1.7: `runtime.services[].dropPrivileges` (default false), `SessionInfo.idempotencyRequired`, SDK-API §15.1 one Dockerfile pattern.
