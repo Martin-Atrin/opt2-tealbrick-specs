@@ -212,7 +212,7 @@ Call proofs (`TB-Call`, `typ: tb-call+jwt`, K7, ≤ 60 s; CREDENTIALS §10): op 
 ### 8.2 Hook rules
 - Hook calls are bridge→app HTTP calls, never routed calls: they never trigger hooks and carry no grant. Their legitimacy = config `hooks[]` (Core-resolved, licensed, owner-enabled) + call proof with `phase`.
 - A companion call whose `parentCall` is a call currently inside a hook → `hook_reentry`; companion chains deeper than 3 → `call_depth_exceeded`.
-- `context` is open JSON; the bridge adds nothing itself in opt2 (`onBehalfOf` is reserved for Rules). Unknown namespaced fields pass through untouched.
+- `context` is open JSON. The bridge adds only the reserved `tb.*` keys (v0.1.13: `tb.onBehalfOf`, §8.5); hooks never write `tb.*`. Unknown namespaced fields pass through untouched.
 
 ### 8.3 App → app (companion) path
 `POST /tb/v1/call` (internal) with `TB-Assert: <instance assertion>` (`tb-instance-assert+jwt`, `htm`, `htu`, `bd` required), `TB-Grant: <companion grant from the caller's slice>`, body `CallEnvelope {target: <product>, op, input, idempotencyKey?, parentCall?}`. Pipeline = §8.1 with: step 1 instance assertion (`kid` ∈ `instanceKeys` or S5 for `(ins, svc)`; caller or target paused → `paused`), step 3 the presented grant (`sub` = caller instance, `aud` = target), steps 4–13 identical, same hooks. Result = the op answer (`ok` / `held` / error envelope).
@@ -356,3 +356,17 @@ None open for the bridge after C15/C16 and CORE §14. Settled items recorded for
 
 ## v0.1.12 (fallback removed, 2026-10-12T10:19:19Z)
 - §4/§5: enrolment responses and configs without a valid root-signed `portalKeySet` are refused (`keyset_missing` / `keyset_invalid`), first enrolment included, by every bridge build that pins roots for its channel (bridge 0.1.13+). The 0.1.11 transition text is superseded.
+
+## v0.1.13 additions (C81 G1/G4b, C82, C85, C86)
+### 8.1 step 6 — hold verdict (G1)
+- A before hook answers `{allow: true}`, `{allow: false, reason?}` (refuse → `hook_denied`), or `{allow: false, hold: {family, reason}}` (`family` ∈ HOOK_HOLD_FAMILIES, `reason` 1..280 chars; anything else, or `hold` with `allow: true` → `hook_failed`).
+- Precedence over the whole before chain (in order): the first refuse stops the chain at once (`hook_denied`). Otherwise the FIRST hold verdict is kept and the remaining before hooks still run (any later refuse wins). With a kept verdict, steps 7–10 run as usual and the op call proof carries `hv: {f: family, r: reason, by: "<product>/<hookId>"}` (CREDENTIALS §10). The app decides the hold (`authorize()`); the bridge never answers `held` itself.
+- Retry after approval (C82): the bridge runs the before chain again for every call, the retry included. If a before hook now refuses, the retry is refused (`hook_denied`) and the approved hold does NOT run (the approval stays unconsumed). If it answers hold again, the proof carries `hv` again and the app's approval for (caller, op, inputDigest) satisfies it (runs once).
+### 8.5 Reserved context (G4b)
+- If `tools/call` carries `_meta["tealbrick/onBehalfOf"]` (`OnBehalfOfClaim {kind: person|agent|channel_sender, id, display?}`), the bridge validates the shape (`kind` known; `id` 1..256 chars; `display` ≤ 128; JCS ≤ 1 KB) and puts `tb.onBehalfOf = {claim, verified: false, via: "mcp_meta"}` into `context` before the before hooks (hooks and the app see it; it is covered by `ctx` in the proof). A bad or oversized claim is dropped (the call proceeds without it) and counted in the status report `rejected` (kind `claim`, code `on_behalf_of_invalid`). `channel_sender` ids are `"<channel>:<value>"` (SDK-API §18).
+- The `tb.` context namespace is the bridge's: a context hook answer with any `tb.*` key → `hook_failed` (fail closed). The bridge never writes a non-`tb.` key.
+- Later (Martin Q5): the same key may carry `verified: true` + `attestation` (e.g. a Connect-signed sender). Consumers treat `verified: false` as a claim: narrow only, never widen.
+### 8.3 — app-initiated calls (C85)
+- A companion call without `parentCall` is app-initiated (timers, background refresh, event handlers). Same pipeline as §8.3 (assertion, presented companion grant, gate, all hook phases, holds by the target app); rate-limited per caller instance (120/min, burst 30 → `rate_limited` + `Retry-After`) like any caller; audited `call.app_initiated` in the bridge log line (`parentCall: null`). Hooks see `call.caller.type = "app"`.
+### 3 — launch path (C86)
+- A launch ticket (K11 `pur: launch`) may carry `path` (Core-validated, PORTAL-API v0.1.13). After the ticket POST the bridge redirects to `/a/<product><path>` of the ticket's own instance only; it re-checks the path rule (relative, `/`-prefixed, no `//`, `\`, `..`, scheme or host) and falls back to `/a/<product>/` on any doubt.

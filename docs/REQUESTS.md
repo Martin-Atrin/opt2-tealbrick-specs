@@ -526,3 +526,10 @@ Until 0.1.8 the bridge CI runs two passes: all groups but `keyset` via `--cmd` (
 - Need: an app creates a scope instance on an agent's behalf after that agent's first sight (e.g. Kanban `project_create` by an agent); today the creator gets no access (`ScopeStore.set` is person-only, defaultGrants apply once per (agent, type)).
 - Ask: `instances.create(type, id, label, { ownerAgent })` applies the scope's `own` default level to `ownerAgent` when the instance is new (audited as system). Also `instances.delete(type, id)` (drops its grants) for app-side deletes (Q-KB3).
 - Not blocking Kanban 0.1 (Coordinator: 0.1 = own project + owner-shared projects).
+
+## fleet → specs/conformance (2026-10-12, conformance 0.1.8): A4.mark_after_failed is `not_run` for an app with no agent receipt op
+- Fleet 0.1.0 with conformance 0.1.8: **PASS (1 not_run)** — 101 pass, 23 not_applicable, 1 not_run; exit 1 (CONFORMANCE §6 default). The read-only fix works for the hold chain and P1.*.
+- Remaining: `A4.mark_after_failed` → not_run "no call ran ok with a receipt (supply an inputs fixture for a receipt op)" (dist/checks/app.js:725). Fleet has NO agent op with `receipt: true` and no holdable op, so no fixture can make it run. Ask: `not_applicable` ("no agent op with receipt true and no hold") when `agentOps.filter(o => o.receipt)` is empty and no hold was made.
+- Interim (needs Coordinator waiver, like C55): Fleet's conformance script adds `--allow-not-run` until 0.1.9, then removes it.
+
+## specs: DONE (2026-10-12) — 0.1.12 bundle released: spec 0.1.12, manifest 0.1.7 (cron helper), miniapp-sdk 0.1.12 (claim guard + reclaim, spine S1), conformance 0.1.8 (Fleet read-only hold chain n/a + P1 without caps; Bridge one-pass --test-roots fixtures: rotation re-signs the statement, standalone doc carries it), create-tealbrick-miniapp 0.1.6. Queued for conformance 0.1.9 (with spec 0.1.13): A5 free-text tamper field (Inbox), A4.mark_after_failed n/a + per-check waivers with expiry (Fleet).

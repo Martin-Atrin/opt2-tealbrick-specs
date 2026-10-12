@@ -12,6 +12,8 @@ import type {
   HookRequest,
   HookResponseByPhase,
   InstanceSlice,
+  IsoTime,
+  OnBehalfOfContext,
   OpCallBody,
   OpResult,
   ScopeSummaryResult,
@@ -50,6 +52,7 @@ import type {
   DynamicSearchInput,
   Effect,
   HoldFamily,
+  HookHoldFamily,
   HookPhase,
   Manifest,
   ManifestValidation,
@@ -60,7 +63,7 @@ import type {
 } from "./manifest.ts";
 
 // Wire shapes owned by bridge.ts / credentials.ts / manifest.ts, re-exported for SDK users (not re-declared).
-export type { AppStatus, BridgeOp, BridgeOpBodies, CallEnvelope, ClaimRequest, ClaimResponse, HookRequest, HookResponseByPhase, InstanceSlice, OpCallBody, OpResult, ScopeSummaryResult };
+export type { AppStatus, BridgeOp, BridgeOpBodies, CallEnvelope, ClaimRequest, ClaimResponse, HookRequest, HookResponseByPhase, InstanceSlice, OnBehalfOfContext, OpCallBody, OpResult, ScopeSummaryResult };
 
 // ════════════════════════════════════════════════════════════════════════════
 // §A  @opt2-tealbrick/manifest — pure, synchronous, no I/O
@@ -277,13 +280,18 @@ export interface AuthorizeInput {
   usage: Partial<Record<Effect, number>>;
   /** "approved" only when an approved, unconsumed hold matches (caller, op, inputDigest) — SDK-API §4.3 */
   approval: "none" | "approved";
+  /** v0.1.13 (G1): the call proof's `hv` claim (attested before-hook hold verdict), else null */
+  holdVerdict: { family: HookHoldFamily; reason: string; by: string } | null;
 }
 export interface Decision {
   decision: "run" | "hold" | "refuse";
   reason: string;
-  holdFamily?: HoldFamily | "caps";
+  holdFamily?: HoldFamily | "caps" | "policy";
+  /** v0.1.13 (G1): `<product>/<hookId>` when a before-hook verdict caused the hold */
+  heldBy?: string;
 }
-/** App SDK only. Order: (0) slice pause → verifyGrant → scope access → held family / money → caps → run. */
+/** App SDK only. Order: (0) slice pause → verifyGrant → scope access → hook hold verdict (v0.1.13) → held family / money
+ *  → caps → run. `approval: "approved"` satisfies the verdict, held-family and money steps alike (one approval runs once). */
 export declare function authorize(input: AuthorizeInput): Decision;
 
 // ── Vocabularies owned here (others re-exported from manifest.ts / credentials.ts) ──
@@ -383,6 +391,10 @@ export interface OpContext {
   scopes: Pick<ScopeStore, "instances">;
   /** v0.1.3 (C31): THE app-secret mechanism */
   secrets: AppSecrets;
+  /** v0.1.13 (C86): push the status (pendingHolds) now; debounced 1 s, at most one push per second */
+  statusChanged(): void;
+  /** v0.1.13 (C86): `<portalUrl>/w/<ws>/open?product=<own>&path=<path>`; null until the slice has portalUrl */
+  ownerLink(path: string): string | null;
 }
 
 /** v0.1.3 (C31): app secrets sealed under TB_KEK (AAD = name); excluded from export, sealed inside backups. */
@@ -400,6 +412,23 @@ export interface StartContext {
   secrets: AppSecrets;
   getKey(name: string): Promise<string | null>;
   callServiceHelper<O = Json>(serviceId: string, path: string, body: Json): Promise<O>;
+  /** v0.1.13 (C85): app-initiated companion call (timers, background refresh): no parentCall, own companion grant; same
+   *  hooks, holds, rate limits as any caller; audited `call.app_initiated` by the bridge. Usable for the app's lifetime. */
+  callApp<O = Json>(product: string, op: string, input: Json, opts?: { idempotencyKey?: string }): Promise<CompanionResult<O>>;
+  /** v0.1.13 (C86) */
+  statusChanged(): void;
+  /** v0.1.13 (C86): `<portalUrl>/w/<ws>/open?product=<own>&path=<path>`; null until the slice has portalUrl */
+  ownerLink(path: string): string | null;
+}
+/** v0.1.13: the ctx every event handler gets (C85: callApp outside an op handler; C86: statusChanged). */
+export interface EventContext {
+  db: Db;
+  log: Logger;
+  scopes: ScopeStore;
+  callApp<O = Json>(product: string, op: string, input: Json, opts?: { idempotencyKey?: string }): Promise<CompanionResult<O>>;
+  statusChanged(): void;
+  /** v0.1.13 (C86): `<portalUrl>/w/<ws>/open?product=<own>&path=<path>`; null until the slice has portalUrl */
+  ownerLink(path: string): string | null;
 }
 
 export type Handler<I = Json, O = Json> = (input: I, ctx: OpContext) => Promise<O>;
@@ -448,9 +477,12 @@ export type PublicHandler = (
 
 // ── App definition ──
 export interface AppEvents {
-  agentAdded?(agent: SliceAgent, ctx: { db: Db; scopes: ScopeStore; log: Logger }): Promise<void>;
-  agentRemoved?(agent: SliceAgent, ctx: { db: Db; log: Logger }): Promise<void>;
-  keysChanged?(names: string[], ctx: { log: Logger }): Promise<void>;
+  agentAdded?(agent: SliceAgent, ctx: EventContext): Promise<void>;
+  agentRemoved?(agent: SliceAgent, ctx: EventContext): Promise<void>;
+  keysChanged?(names: string[], ctx: EventContext): Promise<void>;
+  /** v0.1.13 (Fleet): the FULL slice agent list, once per installed slice whose `agents[]` differ from the previous one
+   *  (ids, names, mode, status): add, re-add, rename, pause/resume. Also once after boot with the first slice. */
+  agentsChanged?(agents: SliceAgent[], ctx: EventContext): Promise<void>;
 }
 export interface AppDefinition<A extends string = never> {
   manifest: Manifest;
@@ -466,6 +498,9 @@ export interface AppDefinition<A extends string = never> {
   auditActions?: readonly A[];
   /** v0.1.3 (C33) */
   onStart?(ctx: StartContext): Promise<void>;
+  /** v0.1.13 (C86): items waiting for the owner beyond held receipts (0..10 000), added to AppStatus.pendingHolds.
+   *  1 s timeout; an error or timeout counts 0 and logs a WARNING each time (rate-limited 1/min, suppressed count). */
+  pendingCount?(db: Db): Promise<number>;
 }
 export interface App {
   readonly manifest: Manifest;
@@ -521,7 +556,9 @@ export interface Receipt {
   caller: { type: "agent" | "app"; id: AgentId | InstanceId; name: string };
   op: string;
   effect: Effect;
-  holdFamily: HoldFamily | "caps" | null;
+  holdFamily: HoldFamily | "caps" | "policy" | null;
+  /** v0.1.13 (G1): `<product>/<hookId>` of the before hook whose verdict held this call, else null */
+  heldBy: string | null;
   status: ReceiptStatus;
   inputDigest: Sha256Digest;
   summary: string;
@@ -548,6 +585,50 @@ export interface ReceiptStore {
   usage(caller: AgentId | InstanceId, caps: FreeCaps, now: number): Promise<Partial<Record<Effect, number>>>;
   holdStatus(caller: AgentId | InstanceId, holdId: string): Promise<{ status: ReceiptStatus; decidedAt: number | null; expiresAt: number | null } | null>;
 }
+/** v0.1.13 (G4): standard op `tb.holds_pending` — audience agent, crud read, effect read, idempotency none, receipt false.
+ *  An AGENT caller sees only its own pending holds; a companion APP caller (a grant naming tb.holds_pending, e.g. the
+ *  consented wildcard companion) sees all pending holds of the instance. Summaries only: never the input or the view. */
+export interface HoldsPendingInput {
+  /** 1..100, default 50 */
+  limit?: number;
+  cursor?: string;
+}
+export interface HoldsPendingItem {
+  id: `hld_${Ulid}`;
+  product: string;
+  op: string;
+  family: HoldFamily | "caps" | "policy";
+  /** hook verdict reason or the SDK's hold reason, ≤ 280 */
+  reason: string;
+  heldBy: string | null;
+  /** the receipt summary (redacted, ≤ 280) */
+  summary: string;
+  caller: { type: "agent" | "app"; id: AgentId | InstanceId; name: string };
+  createdAt: IsoTime;
+  ageS: number;
+  /** app-relative decision page path `/holds/<id>`; open it with a Portal launch ticket (tickets.launch {product, path}) */
+  decidePath: string;
+}
+export interface HoldsPendingOutput {
+  items: HoldsPendingItem[];
+  nextCursor: string | null;
+}
+
+// ── Cross-app context contracts (v0.1.13, SDK-API §18) ──
+/** Context key `rules.narrowing` (written by the app whose product id is `rules`). Knowledge (and any memory app) MUST
+ *  filter read/recall results by `memoryTags`; an unknown `v` → refuse `narrowing_unsupported` (fail closed). */
+export interface RulesNarrowingV1 {
+  v: 1;
+  ruleId: string;
+  reason: string;
+  memoryTags?: {
+    /** keep only results with at least one of these tags (each ≤ 64 chars, ≤ 32 per list) */
+    anyOf?: string[];
+    /** drop results with any of these tags */
+    noneOf?: string[];
+  };
+}
+
 /** Person only (tb.holds_decide). */
 export interface HoldDecideInput {
   holdId: `hld_${Ulid}`;

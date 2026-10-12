@@ -112,6 +112,8 @@ export const AUDIT_ACTIONS = [
   "canvas.save", "edge.create", "edge.update", "edge.delete", "hook.set",
   "instance.deploy", "instance.retry", "instance.cancel", "instance.update", "instance.rollback",
   "instance.remove", "instance.register_own_infra", "instance.registered", "bridge.deploy",
+  /** v0.1.13 (C82): owner grants / revokes a consent (wildcard companion `tb.holds_pending`) */
+  "instance.consent",
   "bridge.enrolment_code_issue", "bridge.enrol",
   "ticket.launch", "ticket.keys",
   "licence.assign", "licence.unassign", "licence.move", "licence.create", "licence.revoke",
@@ -136,7 +138,12 @@ export type ErrorCode =
   | "draft_state" | "recipe_not_portable" | "authorization_pending" | "slow_down" | "access_denied"
   | "expired_token" | "enrolment_code_invalid" | "bridge_key_revoked" | "stripe_signature_invalid"
   | "clerk_signature_invalid" | "account_disabled"
-  | "offer_unavailable" | "checkout_failed" | "upstream_timeout" | "internal";
+  | "offer_unavailable" | "checkout_failed" | "upstream_timeout"
+  /** v0.1.13 (C86): tickets.launch `path` outside the target app */
+  | "path_invalid"
+  /** v0.1.13 (C82): instances.consent for a consent the release does not ask for */
+  | "consent_not_requested"
+  | "internal";
 /** CORE §8: the one error envelope. */
 export interface ErrorEnvelope { error: { code: ErrorCode; message: string; requestId: string; details?: Record<string, unknown> } }
 export interface PageQuery { cursor?: string; limit?: number }
@@ -593,7 +600,13 @@ export interface Instance {
   settings: Record<string, SettingValue>;
   lastError: { code: ErrorCode; message: string } | null;
   createdAt: IsoTime;
+  /** v0.1.13 (C82): consents the release asks for (wildcard companion → `holds_pending_all`) and their state */
+  consents?: InstanceConsent[];
 }
+/** v0.1.13 (C82). GUI text for `holds_pending_all`: "This app can see the pending approvals of all apps". */
+export type ConsentKind = "holds_pending_all";
+export interface InstanceConsent { kind: ConsentKind; granted: boolean; at: IsoTime | null; by: PersonId | null }
+export interface InstanceConsentInput { ws: WorkspaceId; ins: InstanceId; kind: ConsentKind; granted: boolean }
 export interface InstanceList { items: Instance[] }
 export interface DeployInput { ws: WorkspaceId; product: ProductId; releaseId?: ReleaseId; settings: Record<string, SettingValue> }
 export interface DeployResult { instance: Instance }
@@ -635,6 +648,9 @@ export interface KeyStatus {
   items: { name: string; label: string; required: boolean; source: KeySource; set: boolean | null; usedBy: ProductId[] }[];
 }
 export interface KeyTicketInput { ws: WorkspaceId; names?: string[]; returnTo?: string }
+/** v0.1.13 (C86): `path` = app-relative, starts with `/`, ≤ 512 chars; refused `path_invalid` (400) when it has a scheme,
+ *  a host, `//`, `\\`, a `..` segment (also after percent-decoding) or control characters. The bridge serves it under
+ *  `/a/<product>` of the TARGET app only. */
 export interface LaunchTicketInput { ws: WorkspaceId; product: ProductId; path?: string }
 /** url = bridge origin + one-time K11 ticket (form POST target). */
 export interface TicketResult { url: string; ticket: string; expiresAt: IsoTime }
@@ -828,7 +844,7 @@ export interface SchemaMap {
   Canvas: Canvas; CanvasSaveInput: CanvasSaveInput; Edge: Edge; EdgeCreateInput: EdgeCreateInput; EdgeUpdateInput: EdgeUpdateInput;
   EdgeRef: EdgeRef; HookList: HookList; HookSetInput: HookSetInput; HookSubscription: HookSubscription;
   Instance: Instance; InstanceList: InstanceList; DeployInput: DeployInput; DeployResult: DeployResult; BridgeDeployResult: BridgeDeployResult;
-  InstanceUpdateInput: InstanceUpdateInput; RollbackInput: RollbackInput; RemoveInput: RemoveInput; RemoveResult: RemoveResult;
+  InstanceUpdateInput: InstanceUpdateInput; RollbackInput: RollbackInput; RemoveInput: RemoveInput; RemoveResult: RemoveResult; InstanceConsentInput: InstanceConsentInput;
   DeployProgressEvent: DeployProgressEvent; OwnInfraRegisterInput: OwnInfraRegisterInput; EnrolmentCode: EnrolmentCode;
   BridgeStatus: BridgeStatus; KeyStatus: KeyStatus; KeyTicketInput: KeyTicketInput; LaunchTicketInput: LaunchTicketInput;
   TicketResult: TicketResult;
@@ -957,6 +973,7 @@ export const ROUTES = [
   { opId: "instances.update", method: "POST", path: "/workspaces/{ws}/instances/{ins}/update", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "InstanceUpdateInput", output: "Instance", rate: "write", bodyLog: "meta", audit: "instance.update", draftable: true, confirm: true, idempotent: true, registry: "instance" },
   { opId: "instances.rollback", method: "POST", path: "/workspaces/{ws}/instances/{ins}/rollback", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "RollbackInput", output: "Instance", rate: "write", bodyLog: "meta", audit: "instance.rollback", draftable: true, confirm: true, idempotent: true, registry: "instance" },
   { opId: "instances.remove", method: "POST", path: "/workspaces/{ws}/instances/{ins}/remove", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "RemoveInput", output: "RemoveResult", rate: "write", bodyLog: "meta", audit: "instance.remove", draftable: true, confirm: true, idempotent: false, registry: "instance" },
+  { opId: "instances.consent", method: "POST", path: "/workspaces/{ws}/instances/{ins}/consent", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "InstanceConsentInput", output: "Instance", rate: "write", bodyLog: "meta", audit: "instance.consent", draftable: false, confirm: true, idempotent: true, registry: "instance" },
   { opId: "instances.register_own_infra", method: "POST", path: "/workspaces/{ws}/instances/own-infra", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "OwnInfraRegisterInput", output: "EnrolmentCode", rate: "sensitive", bodyLog: "none", audit: "instance.register_own_infra", draftable: false, confirm: false, idempotent: false, registry: "instance" },
   { opId: "bridge.get", method: "GET", path: "/workspaces/{ws}/bridge", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "BridgeStatus", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "instance" },
   { opId: "bridge.deploy", method: "POST", path: "/workspaces/{ws}/bridge/deploy", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "WorkspaceRef", output: "BridgeDeployResult", rate: "write", bodyLog: "meta", audit: "bridge.deploy", draftable: true, confirm: true, idempotent: true, registry: "instance" },

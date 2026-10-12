@@ -226,6 +226,7 @@ Hooks match only `agent`-audience manifest operations reached through the bridge
 |---|---|
 | M-CP-1 | Companion products unique and ≠ own id → `companion_invalid`. |
 | M-CP-2 | `validateCompanions(m, targets)` (Core at deploy, conformance): target ops exist with audience `agent`; each `op.crud ⊆ crud`; `crud ⊆ ∪ op.crud` → `companion_op_invalid`. |
+| M-CP-3 | v0.1.13 (G4, C82): `product: "*"` (wildcard companion) only with `operations` exactly `["tb.holds_pending"]` and `crud` exactly `["read"]`; the standard op `tb.holds_pending` is the only standard op a companion may name (also for one product) → `companion_invalid`. A wildcard companion is never granted by the manifest alone: Core mints one grant per deployed, licensed app (and for apps deployed later) only after the owner's explicit consent (PORTAL-API `instances.consent`), and deletes them all on revoke. |
 | M-UL-1 | Unlock ids unique; `requires ∈ companions[].product`; `provides` names own operations / skills → `unlock_invalid`. |
 
 ## 10. Skills and harness hints

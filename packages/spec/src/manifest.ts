@@ -10,6 +10,8 @@ export const CRUD_ACTIONS = ["create", "read", "update", "delete"] as const;
 /** Ordered: a dynamic `effectCeiling` admits every effect at or before it in this list. */
 export const EFFECTS = ["read", "write", "outward", "destructive", "money"] as const;
 export const HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money"] as const;
+/** v0.1.13 (G1): families a before hook may hold with = HOLD_FAMILIES + `policy` (a policy app decided). Ops never declare `policy`. */
+export const HOOK_HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "policy"] as const;
 export const AGENT_MODES = ["free", "bound"] as const;
 export const HOOK_PHASES = ["before", "context", "after"] as const;
 export const IDEMPOTENCY_MODES = ["required", "supported", "none"] as const;
@@ -24,11 +26,14 @@ export const PUBLIC_ROUTE_PURPOSES = ["oauth_callback", "webhook"] as const;
 export const CATEGORIES = ["memory", "connectivity", "communication", "automation", "governance", "operations", "productivity", "developer"] as const;
 export const HARNESS_KINDS = ["generic", "claude_desktop", "codex_desktop", "tbd", "claude_agent_sdk", "eve", "tealbrick_cli"] as const;
 /** Standard operations every SDK app serves automatically (MANIFEST.md §5.4): one agent op, the rest person ops. Manifest ids never start with `tb_`. */
-export const STANDARD_OPERATIONS = ["tb.hold_status", "tb.holds_list", "tb.holds_decide", "tb.receipts_list", "tb.agents_list", "tb.scopes_set", "tb.keys_status", "tb.key_set", "tb.key_delete", "tb.export"] as const;
+export const STANDARD_OPERATIONS = ["tb.hold_status", "tb.holds_list", "tb.holds_decide", "tb.receipts_list", "tb.agents_list", "tb.scopes_set", "tb.keys_status", "tb.key_set", "tb.key_delete", "tb.export", "tb.holds_pending"] as const;
+/** v0.1.13 (G4): the ONE op a wildcard companion (`product: "*"`) may name (MANIFEST M-CP-3); needs owner consent at deploy (C82). */
+export const WILDCARD_COMPANION_OPS = ["tb.holds_pending"] as const;
 
 export type CrudAction = (typeof CRUD_ACTIONS)[number];
 export type Effect = (typeof EFFECTS)[number];
 export type HoldFamily = (typeof HOLD_FAMILIES)[number];
+export type HookHoldFamily = (typeof HOOK_HOLD_FAMILIES)[number];
 export type AgentMode = (typeof AGENT_MODES)[number];
 export type HookPhase = (typeof HOOK_PHASES)[number];
 export type IdempotencyMode = (typeof IDEMPOTENCY_MODES)[number];
@@ -326,7 +331,9 @@ export interface Hook {
 }
 
 export interface Companion {
-  product: ProductId;
+  /** v0.1.13 (G4): `"*"` = every deployed app of the workspace, ONLY with operations ["tb.holds_pending"] and crud ["read"]
+   *  (M-CP-3); Core mints the per-app grants only after the owner's explicit consent (C82, PORTAL-API `instances.consent`). */
+  product: ProductId | "*";
   operations: SnakeId[];
   crud: CrudAction[];
   purpose: string;

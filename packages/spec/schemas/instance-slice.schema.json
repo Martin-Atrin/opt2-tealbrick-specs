@@ -155,6 +155,10 @@
     },
     "standalone": {
       "$ref": "workspace-config.schema.json#/$defs/standaloneBlock"
+    },
+    "portalUrl": {
+      "$ref": "workspace-config.schema.json#/$defs/httpsUrl",
+      "description": "v0.1.13 (C86): the Portal GUI origin (no path); apps build owner links `<portalUrl>/w/<ws>/open?product=<p>&path=<path>`."
     }
   }
 }

@@ -1,7 +1,7 @@
 // opt2 credential registry — types + data only (no runtime code). Normative twin of specs/CREDENTIALS.md.
 // v0.1, Lead · Specs, 2026-10-11. Vocabulary (CRUD, effects, hold families, modes, hook phases) comes from ./manifest.ts.
 
-import type { AgentMode, CrudAction, HoldFamily, HookPhase } from "./manifest.ts";
+import type { AgentMode, CrudAction, HoldFamily, HookHoldFamily, HookPhase } from "./manifest.ts";
 
 // ── Identifiers (CORE §1) ────────────────────────────────────────────────────
 /** 26-char Crockford base32 ULID, upper case. */
@@ -302,6 +302,14 @@ export interface CallProofOpClaims extends BaseClaims<BridgeRef, AgentRef | Inst
   in: Sha256Digest;
   /** sha256 of JCS(context) */
   ctx: Sha256Digest;
+  /** v0.1.13 (G1): before-hook hold verdict, attested by the bridge; the target's authorize() holds with it */
+  hv?: HoldVerdictClaim;
+}
+/** v0.1.13 (G1): `f` ∈ HOOK_HOLD_FAMILIES, `r` 1..280 chars, `by` = `<product>/<hookId>` of the first holding before hook. */
+export interface HoldVerdictClaim {
+  f: HookHoldFamily;
+  r: string;
+  by: string;
 }
 export interface CallProofHookClaims extends BaseClaims<BridgeRef, AgentRef | InstanceRef, InstanceRef> {
   call: CallId;

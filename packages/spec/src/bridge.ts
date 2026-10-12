@@ -32,6 +32,7 @@ import type {
   DynamicCatalogEntry,
   Effect,
   HoldFamily,
+  HookHoldFamily,
   HookMatch,
   HookPhase,
   KeySource,
@@ -204,6 +205,8 @@ export interface InstanceSlice extends SliceClaims {
   grants: CompactJws[];
   agents: { id: AgentId; name: string; mode: AgentMode; status: "active" | "paused" }[];
   standalone?: StandaloneState;
+  /** v0.1.13 (C86): the Portal GUI origin (`https://…`, no path); apps build owner links (`/w/<ws>/open?product=&path=`) */
+  portalUrl?: string;
 }
 
 // ── Enrolment (BRIDGE §4) — op `bridge_api.enrol` ───────────────────────────
@@ -324,7 +327,15 @@ export interface AfterHookRequest extends HookRequestBase<"after"> {
   output: JsonValue;
 }
 export type HookRequest = BeforeHookRequest | ContextHookRequest | AfterHookRequest;
-export interface BeforeHookResponse { allow: boolean; reason?: string }
+/** v0.1.13 (G1): `{allow: false, hold}` = hold verdict (never with allow true). Bridge precedence over the chain:
+ *  any refuse wins at once; else the FIRST hold is kept, later before hooks still run (and may refuse); then forwarded
+ *  with the verdict in the call proof (`hv`). The bridge re-runs the chain on the retry after approval (C82). */
+export interface BeforeHookResponse { allow: boolean; reason?: string; hold?: HookHoldVerdict }
+export interface HookHoldVerdict {
+  family: HookHoldFamily;
+  /** 1..280 chars, shown to the owner and the agent */
+  reason: string;
+}
 /** every key MUST start with `<hook product>.` */
 export interface ContextHookResponse { add: Record<`${ProductId}.${string}`, JsonValue> }
 export interface AfterHookResponse {
@@ -362,6 +373,8 @@ export const TOOL_NAME_RULE = {
   searchSuffix: "_search",
   callSuffix: "_call",
   idempotencyMetaKey: "tealbrick/idempotencyKey", // gitleaks:allow (MCP _meta key name, not a secret)
+  /** v0.1.13 (G4b): runner-set claim, copied UNVERIFIED into context `tb.onBehalfOf` */
+  onBehalfOfMetaKey: "tealbrick/onBehalfOf",
   skillUriPrefix: "tealbrick://skills/",
 } as const;
 /** `<product>__<op>`, `<product>__<op>_search|_call`, `<product>__<dynamic list entry>`, `<product>__tb_hold_status`. */
@@ -446,7 +459,7 @@ export interface AppStatus {
   scopesRev: number;
   sliceRevision: number;
   keysRev: number;
-  /** holds waiting for the owner, count only */
+  /** items waiting for the owner, count only = held receipts + `pendingCount()` (v0.1.13, C86) */
   pendingHolds: number;
 }
 /** 200 when the slice or keysRev changed; otherwise 204 after `wait`. */
@@ -467,8 +480,28 @@ export interface CallEnvelope<I = JsonValue> {
   op: SnakeId;
   input: I;
   idempotencyKey?: string;
-  /** set by the SDK to the current call id; used for hook re-entry and depth limits */
+  /** set by the SDK to the current call id; used for hook re-entry and depth limits. v0.1.13 (C85): ABSENT for
+   *  app-initiated calls (StartContext / events ctx / timers): the bridge audits them `call.app_initiated`. */
   parentCall?: CallId;
+}
+
+// ── Reserved context (v0.1.13, G4b) ─────────────────────────────────────────
+/** The `tb.` context namespace is bridge-only: a context hook answer with a `tb.*` key is refused (hook_failed). */
+export const RESERVED_CONTEXT_PREFIX = "tb." as const;
+/** `_meta["tealbrick/onBehalfOf"]` as the runner sends it (≤ 1 KB JCS, else dropped). */
+export interface OnBehalfOfClaim {
+  kind: "person" | "agent" | "channel_sender";
+  /** channel_sender: `"<channel>:<value>"`, channel `[a-z0-9_-]{1,32}` (buzz | slack | telegram …), value = Connect's sender
+   *  value (Buzz npub, Slack user id, Telegram numeric id); consumers MAY read a bare `npub1…` as `buzz:` */
+  id: string;
+  display?: string;
+}
+/** Context key `tb.onBehalfOf`. Unverified = a claim: consumers may use it to NARROW, never to widen access.
+ *  Later (Martin Q5): `verified: true` + `attestation` (e.g. a Connect-signed sender) — same key, pluggable. */
+export interface OnBehalfOfContext {
+  claim: OnBehalfOfClaim;
+  verified: false;
+  via: "mcp_meta";
 }
 export type CompanionCallResponse<O = JsonValue> = OpResult<O> | ErrorEnvelope;
 
