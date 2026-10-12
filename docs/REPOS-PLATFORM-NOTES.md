@@ -25,7 +25,7 @@ Remote `main` of every repo holds one initial commit (README, .gitignore, secret
 
 ## CI standard (template ci-v2) — every lead: adopt it
 - Standard + runner: `opt2-tealbrick-platform/ci/` (read `ci/README.md`). One pipeline: secret-scan, setup (template drift, `tealbrick-ci.json`, package rules, `@opt2-tealbrick/*` URL-dependency check), install, typecheck, lint, unit, conformance, build, kaniko image-check; on `v*` tags image-publish to `ghcr.io/martin-atrin/<image>` + signed release record → release registry; on `<package>-v<ver>` tags a tarball per package on the GitHub release.
-- Current template: `ci-v3` (adds the pinned manifest package for signed release records). Repos on ci-v2 keep working; re-run `adopt` to move to ci-v3 (needed only by repos that publish images: knowledge, connect, bridge, portal-core, portal-gui).
+- Current template: `ci-v5` (2026-10-12): adds companion `kind: "service"` images (BSA-01), the `gen` stage (miniapps need `"gen": "tb-gen all"`, gen/ git-ignored) and kit tarball on v* tags (BSA-03), manifest 0.1.3 for release records (BSA-16), plus ci-v4's VOLUME check. Move with `node ci/tb-ci.ts adopt ../opt2-tealbrick-<name> --kind <kind>` (keeps tealbrick-ci.json, pins $schema to ci-v5); Knowledge also adds one `kind: "service"` image per manifest service with `build` (see ci/README.md).
 - Adopted on main (2026-10-11 ~19:45): specs, sdk, qa, packages, platform, bridge, connect. NOT yet: knowledge, portal-core, portal-gui, website, tbd.
 - Woodpecker is LIVE for all 12 repos (2026-10-11 ~20:20): every push to main and every PR runs the pipeline. Fork PRs need approval.
 - Lead to adopt (repo already has lead commits; Platform did not touch it): knowledge, connect, bridge, portal-core, portal-gui, website, tbd. Command:

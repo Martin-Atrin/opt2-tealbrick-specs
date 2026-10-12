@@ -350,3 +350,29 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 - Knowledge's copy anchors the match at statement starts: `/(?:^|[;\n])\s*(?:import|export)\s*(?:[^;"'`]*?\bfrom\s*)?["']([^"']+)["']/g`. Please fix the template (and add a test with ui 0.1.1).
 
 ## specs: DECIDED (C53, C54) — spec 0.1.7: `runtime.services[].dropPrivileges` (default false), `SessionInfo.idempotencyRequired`, SDK-API §15.1 one Dockerfile pattern.
+
+## connect: two SDK/template items found in the BSA fix pass (2026-10-12)
+1. **Template `scripts/build-ui.ts` import scan matches string text.** The specifier regex `\b(?:import|export)\s*…["']…["']` also matches text such as `"tb/v1/ops/tb.export", { method: …` (word `export` followed by a quote) and fails the build with a bogus module. Connect's copy scans statements only (`^[ \t]*(?:import|export)…`, `gm`). Proposal: same fix in create-tealbrick-miniapp.
+2. **tb-gen kit has no person-op types.** The kit covers agent ops (MCP tools); person-op outputs stay hand-typed in app UIs (BSA-08 residue). Proposal: `tb-gen kit` (or a `ui` target) also emits person-op input/output types and the idempotency facts, so apps import them instead of writing ops.ts wrappers. Connect today derives the idempotency facts from the manifest at build time (dist/ui/ops.json).
+
+## bridge → specs/conformance: C5.portal_key_rotation fails because of the suite, not the bridge (conformance src, unreleased)
+- `bridge-world.ts` `publish()` freezes `portalKeys` into `configExtra`, which `fake-portal.ts` `configBody()` merges LAST. `rotateKey()` then calls `mintRevision()` directly, so the announce / activate / retire revisions still carry the stale `[A active]` list. The bridge never sees B announced (bridge log: `invalid_token step 3: unknown kid; trusted 1` on the B-signed revision) and correctly refuses it (CORE §4: only announced keys are trusted).
+- Fix (one line in `rotateKey`, or drop `portalKeys` from `configExtra` except for standalone): refresh `configExtra.portalKeys` from `p.keys` before `mintRevision()`. With that patch applied in a scratch copy, C5.portal_key_rotation passes against the unchanged bridge (announce acked; activate acked; re-minted true; retire true).
+
+## specs: DONE — template build-ui import scanner bug (Knowledge report): tokenizer-based `importSpecifiers` (template/scripts/import-scan.ts) + regression tests; shipped in create-tealbrick-miniapp 0.1.2.
+
+## knowledge: in-process privilege drop vs. conformance `--start` harness under root CI (miniapp-sdk 0.1.6)
+- `startApp` drops the WHOLE process to uid 1000 when it runs as root. With `tb-conformance app --start <module>` the app runs inside the conformance process, so after boot the suite itself is uid 1000 and cannot write `--report` files into a root-owned workspace (Woodpecker steps run as root): `EACCES … .conformance/report.json`, exit 2. The template does not pass `--report`, so it does not notice.
+- Knowledge works around it (`chmod 0777 .conformance` before the run). Suggest: conformance opens its report files before starting the app, or the SDK skips the drop when `TB_DATA_DIR` lives under the conformance temp dir / an explicit `TB_NO_PRIVILEGE_DROP=1` for test harnesses (would need a spec env name), or the template's harness uses `--cmd`.
+
+## bridge → specs/conformance: relay B10.stdio_only needs lsof (not in the CI image) — please add a Linux /proc fallback
+- In Woodpecker (node:24 bookworm) `tb-conformance relay` records `not_run B10.stdio_only — lsof unavailable: spawnSync lsof ENOENT`, which fails the run. Linux has the same data in `/proc/<pid>/net/tcp{,6}` + `/proc/<pid>/fd` (socket inodes) for the relay's process tree. Until then the bridge CI carries a narrow environment waiver (id + status not_run + text "lsof unavailable").
+- Also FYI: `cred.p1.relay_rejects_person` sends the refused call right after the `B10.memory_snapshot` heap snapshot; on a slow CI host the relay's event loop is still blocked writing the snapshot, so the 15 s answer window may be too short. Waiting until the snapshot file stops growing before the next step would make the check timing-independent.
+- Update (bridge lead): the relay_rejects_person CI failure is caused by the harness, not timing: `--cmd` runs via `sh -c`; on Debian `sh` is dash, which stays in the process tree, and B10.memory_snapshot sends SIGUSR2 to every pid of the tree, killing dash (default action), after which the suite treats the relay as exited. bash (macOS) execs a single command, so it passes locally. Bridge CI now passes `exec <cmd>`; suggestion: signal only processes whose argv contains `node`, or spawn with `exec` yourselves.
+
+## specs: DONE (C55 + Connect + Knowledge items) — conformance 0.1.4: --start in a child process (root CI EACCES), --cmd without sh -c + target-only signals, B10 /proc fallback, C5 rotation fixture; miniapp-sdk 0.1.7: tb-gen kit person-op types + IDEMPOTENCY facts.
+
+## qa: CREDENTIALS §12 vs routes.ts — draftDigest vs revision (S3, consistency)
+- CREDENTIALS.md:175 says the apply request "carries the `draftDigest` the owner saw (mismatch → refuse)"; `DraftApplyInput` (spec 0.1.7) carries `revision` + `confirm: true` and no digest. Live behaviour follows routes.ts (revision). Ask: align the CREDENTIALS text to `revision` (or add the digest to the route); conformance should test a stale revision → 409.
+
+## specs: DONE (qa draftDigest vs revision) — spec 0.1.8: CREDENTIALS §12 aligned to routes.ts (`revision` + `confirm: true`, stale → 409 revision_conflict).
