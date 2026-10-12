@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.24 → v0.1.25 (C117 report code)
+- StatusReport rejected kind `config` code `hook_not_listed` (+ `ins` of the hook app) = a matching declared hook missing from config.hooks (the call was refused). Conformance 0.1.14: group `c117` (B27.*), B25.real_hook_after_update, A11.narrowing_empty_anyof.
+
 ## Changelog v0.1.23 → v0.1.24 (C117, C116)
 - C117: a hook leaves the gate ONLY by explicit owner action (switch it off, remove the app) — never by run state (queued, deploying, unhealthy), an update, a licence lapse or a missing config bump. Core lists every declared hook of every deployed app in config `hooks[]` with `enabled` (owner switch) and bumps the config on every change that can affect the list; the bridge fails closed (`hook_failed`) for a matching declared hook that is absent or whose app is down (BRIDGE v0.1.24). Licence lapse keeps the hook listed (the app stops → calls fail closed with a plain "licence lapsed" reason; the owner removes the app to unblock).
 - C116: StatusReport rejected kind `config` code `standalone_without_grants`.

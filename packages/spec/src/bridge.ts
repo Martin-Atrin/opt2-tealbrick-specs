@@ -294,6 +294,7 @@ export interface StatusReport {
   connectionsRevoked: { con: ConnectionId; reason: "refresh_reuse" | "client_revoke" }[];
   claims: ClaimRecord[];
   /** v0.1.24 (C116): kind `config` + code `standalone_without_grants` = the final standalone document carries no agent grants (applied, fail closed).
+   *  v0.1.25 (C117): kind `config` + code `hook_not_listed` (+ `ins` of the hook app) = a matching declared hook missing from config.hooks (call refused).
    *  v0.1.14 (L3): `bridge_op` = a failed catalog / resolve / mark / scope_summary call to an app (code = the app's refusal or transport error).
    *  v0.1.17 (L3, C104): `manifest` = an app manifest the bridge refused (code = the refusal, e.g. `manifest_mismatch`, a validator code, `bridge_too_old`) */
   rejected: {

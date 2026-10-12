@@ -393,3 +393,4 @@ None open for the bridge after C15/C16 and CORE §14. Settled items recorded for
   - present and enabled (or `enabled` absent) → run as today;
   - ABSENT from `config.hooks`, or its app is down / unreachable / not claimed → the call is refused `hook_failed` (fail closed; message names the hook and "not active" / "app unavailable"). Never forwarded without it.
 - A hook therefore leaves the gate only by an explicit owner action (switch off, remove the app), never because of a run state, an update in progress, a licence lapse or a missing config bump.
+- v0.1.25 (bridge 0.1.22): the bridge reports a matching declared hook that is missing from `config.hooks` as StatusReport `rejected[]` kind `config`, code `hook_not_listed`, with `ins` = the hook app's instance.
