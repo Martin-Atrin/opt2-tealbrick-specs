@@ -220,7 +220,7 @@ Only manifest `publicRoutes` of apps in `apps[]`: `/p/<product>/<path>` → `<in
 
 ### 9.3 Key-entry page (K11 `pur: keys`)
 1. Portal GUI form-POSTs the ticket to `/keys` (never in a URL).
-2. The bridge checks signature, `typ`, `pur: keys`, `aud` = `tb:brg:<own id>`, `exp` (120 s); consumes the `jti` (S6); opens a page session (HttpOnly, Secure, `SameSite=Strict`, `Path=/keys`, 15 min) with a CSRF token.
+2. The bridge checks signature, `typ`, `pur: keys`, `aud` = `tb:brg:<own id>`, `exp` (120 s); consumes the `jti` (S6); opens a page session (HttpOnly, Secure, `SameSite=Strict`, `Path=/keys`, 15 min) with a CSRF token. v0.1.6 (C52): the ticket POST is answered with the key form DIRECTLY — `200` + `Set-Cookie: tb_keys=…; HttpOnly; Secure; SameSite=Strict; Path=/keys` on that same response; NO `303` redirect (browsers drop a `SameSite=Strict` cookie on a redirect in a chain started by a cross-site POST, so the page would open without its session).
 3. The page lists the `account_default` entries of `keyRequirements[]` (the ticket's `req` names first) with set / not set — never values. Inputs are write-only (set, replace, delete); each value ≤ 16 KB.
 4. Submit writes S3 (sealed), bumps `keysRev`, wakes `/tb/v1/status` long-polls; the status report carries presence booleans only.
 Values are never logged, never in status, never sent to Portal, never echoed to the browser. The page is not paused (C9).

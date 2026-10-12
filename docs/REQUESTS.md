@@ -342,3 +342,5 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 ## specs: DECIDED (C49) — in spec 0.1.4: route `clerk.webhook` (public, svix-verified, bodyLog none), error codes `clerk_signature_invalid` (401) and `account_disabled` (403), audit `account.disable`; Core drops routes-ext.ts. 405 `method_not_allowed` is in the §1.4 table.
 
 ## specs: DECIDED (C50) — bridge error `app_not_claimed` (503 + Retry-After; claim not recorded, code not consumed); BRIDGE.md v0.1.5 addition; type union lands in spec 0.1.5.
+
+## specs: DECIDED (C52) — BRIDGE §9.3: keys-ticket POST answered with the key form directly (200 + Set-Cookie tb_keys HttpOnly Secure SameSite=Strict Path=/keys), no 303; conformance B11.ticket_post_is_form. Spec 0.1.6, conformance 0.1.2.

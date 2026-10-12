@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.4 → v0.1.6 (C50, C52)
+- C50 `app_not_claimed` (0.1.5); C52 BRIDGE §9.3: keys-ticket POST answered with the form directly (200 + Strict cookie, no 303), conformance `B11.ticket_post_is_form` (0.1.6).
+
 ## Changelog v0.1.3 → v0.1.4 (additive; C44, C46, C49)
 - C49 route `clerk.webhook` + codes `clerk_signature_invalid`, `account_disabled` + audit `account.disable`; C46 405 `method_not_allowed` in PORTAL-API §1.4; C44 `sdkMajorOf` (manifest 0.1.2); one `when` evaluation (manifest 0.1.3).
 
