@@ -243,7 +243,17 @@ export type DestinationCreateInput =
   | { provider: ProviderKey; random: true; name?: never };
 
 // harness options (data rows, Agent Registry)
+/**
+ * v0.1.27 (F75, L1): THE list of harness option ids, the one definition Core, the CLI and the registry rows check against.
+ * A row of the signed index `harnesses` section (data: label, kind, instructions) exists for each id; the id set itself lives
+ * here. `claude-code` = Claude Code (CLI, project-scope MCP). The CLI's `claude-sdk` and `command` are NOT harness options:
+ * they are runner kinds of `agent serve` / `adopt` on an agent connected as `tealbrick-cli`.
+ */
+export const HARNESS_OPTION_IDS = ["tbd-default", "claude-desktop", "codex-desktop", "claude-code", "eve", "tealbrick-cli", "generic-mcp"] as const;
+export type HarnessOptionId = (typeof HARNESS_OPTION_IDS)[number];
+export const isHarnessOptionId = (id: unknown): id is HarnessOptionId => typeof id === "string" && (HARNESS_OPTION_IDS as readonly string[]).includes(id);
 export interface HarnessOption {
+  /** one of HARNESS_OPTION_IDS (typed `string` so a reader holding an older list still parses newer rows, L24) */
   id: string;
   kind: "desktop" | "agentic_system" | "other";
   label: string;

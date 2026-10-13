@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.26 → v0.1.27 (F75: one harness option id list)
+- `HARNESS_OPTION_IDS` / `HarnessOptionId` / `isHarnessOptionId` in `types/routes.ts` are THE harness option id list (L1): `tbd-default`, `claude-desktop`, `codex-desktop`, `claude-code` (new), `eve`, `tealbrick-cli`, `generic-mcp`. Core checks `device.start` harness ids against it and syncs only index rows whose id is in it; the CLI imports it for `agent login --harness`. The label, kind and instruction steps of each id stay data rows of the signed index (C40, C43). `claude-sdk` and `command` are runner kinds of `agent serve` / `adopt` on a `tealbrick-cli` agent, not harness options; there are no aliases (C133).
+
 ## Changelog v0.1.25 → v0.1.26 (C133: no compat ladders; breaks earlier opt2 dev formats)
 - Key-set transition rule (c) removed (CREDENTIALS §9.5): a document without a valid `portalKeySet` is always refused (`keyset_missing`), pinned or not; a build without pinned roots refuses everything. `keySetAnnounce` removed from the SDK signatures (SDK-API §1); `trustedPortalKeys(body, pinned, roots)` returns a verified statement or a refusal (no `legacy`, no `required`). Manifest 0.1.18, miniapp-sdk 0.1.19 (no `KEYSET_REQUIRED`, no `slice_keyset_transition` warning), conformance 0.1.16 (no `--keyset-transitional`). The bridge removes its own legacy path on top (V-07). The SDK's `tb_*` SQL guard for runtimes without `setAuthorizer` (Node < 24.10) stays: engines say `>=24`.
 

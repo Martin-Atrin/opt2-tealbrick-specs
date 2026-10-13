@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { STANDARD_OPERATIONS } from "../src/manifest.ts";
-import { ROUTES } from "../src/routes.ts";
+import { HARNESS_OPTION_IDS, isHarnessOptionId, ROUTES } from "../src/routes.ts";
 
 const dir = new URL("../schemas/", import.meta.url);
 const load = (f: string) => JSON.parse(readFileSync(new URL(f, dir), "utf8"));
@@ -36,4 +36,12 @@ test("route table: unique op ids and method+path", () => {
 
 test("standard operations use the reserved tb. prefix", () => {
   for (const id of STANDARD_OPERATIONS) assert.match(id, /^tb\.[a-z_]+$/);
+});
+
+test("harness option ids: one list, unique, canonical spelling, includes claude-code", () => {
+  assert.equal(new Set(HARNESS_OPTION_IDS).size, HARNESS_OPTION_IDS.length);
+  for (const id of HARNESS_OPTION_IDS) assert.match(id, /^[a-z][a-z0-9-]{1,63}$/);
+  assert.equal(isHarnessOptionId("claude-code"), true);
+  // CLI runner kinds and old spellings are not harness options (no aliases, C133)
+  for (const bad of ["claude-sdk", "command", "claude_code", "generic", "codex", "tealbrick_cli", "", null, 3]) assert.equal(isHarnessOptionId(bad), false, String(bad));
 });
