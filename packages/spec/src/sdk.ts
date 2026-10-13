@@ -125,11 +125,9 @@ export interface KeySet {
   keys: { jwk: Ed25519PublicJwk; status: "pending" | "active" | "retired"; issuer: PortalRef | BridgeRef | InstanceRef }[];
 }
 export declare function keySetFrom(jwks: { keys: Ed25519PublicJwk[] }, issuer: PortalRef | BridgeRef | InstanceRef): KeySet;
-/** Adds keys only if `announcedBy` was verified with a key already in `trusted` (CORE §4). */
-export declare function keySetAnnounce(trusted: KeySet, announced: KeySet, announcedBy: { kid: string }): KeySet;
 
-// ── v0.1.11 (C62/C63): Portal Root Keys + key-set statements (CORE §4, CREDENTIALS §9.5). `keySetAnnounce` is no
-// longer a trust path: it stays exported (deprecated) for one minor and no verifier may use it.
+// ── v0.1.11 (C62/C63): Portal Root Keys + key-set statements (CORE §4, CREDENTIALS §9.5). `keySetAnnounce` was
+// removed in 0.1.26 (C133): the trusted set comes ONLY from a root-signed statement.
 /** Build-pinned root PUBLIC keys of `channel` (= PORTAL_ROOT_KEYS[channel]). The channel is a build constant, never env. */
 export declare function portalRootKeys(channel: PortalRootChannel): Ed25519PublicJwk[];
 /** The pinned statement (bridge sealed S1, app store): its `seq` and the compact JWS verbatim. */
@@ -142,16 +140,15 @@ export declare function signKeySetStatement(claims: KeySetStatementClaims, rootK
 /** Root-signed (header kid ∈ roots), closed claims, well-formed keys, `seq` > pinned.seq (equal seq: byte-identical). Refusal codes: KEYSET_REFUSAL. */
 export declare function verifyKeySetStatement(jws: string, roots: readonly Ed25519PublicJwk[], pinned?: PinnedKeySet | null): VerifiedKeySet | Refusal;
 /**
- * The ONE trust rule for a config / slice body (CREDENTIALS §9.5, transition rule included): body carries
- * `portalKeySet` → verifyKeySetStatement (`changed` = newer than pinned); no `portalKeySet` and a pin exists →
- * `keyset_missing`; no `portalKeySet` and no pin, or a build without pinned roots and no pin → `{ ok: true, legacy: true }`
- * (the caller keeps its pre-v0.1.11 key set and logs a warning).
+ * The ONE trust rule for a config / slice / enrolment body (CREDENTIALS §9.5): the body MUST carry `portalKeySet` →
+ * verifyKeySetStatement against the build-pinned `roots` (`changed` = newer than pinned). No `portalKeySet` →
+ * `keyset_missing` (pinned or not); no roots → `keyset_invalid`. No transition path (C133).
  */
 export declare function trustedPortalKeys(
   body: { portalKeySet?: string },
   pinned: PinnedKeySet | null,
   roots: readonly Ed25519PublicJwk[],
-): (VerifiedKeySet & { legacy: false; changed: boolean }) | { ok: true; legacy: true; reason: string } | Refusal;
+): (VerifiedKeySet & { changed: boolean }) | Refusal;
 /** BSD-07 (BRIDGE §5.7): `http://<name>.railway.internal:<port>`, or (ownInfra only) an http(s) origin listed in `allowList` (bridge env TB_OWN_INFRA_ORIGINS). */
 export declare function isPrivateInternalUrl(url: string, opts?: { ownInfra?: boolean; allowList?: readonly string[] }): boolean;
 
