@@ -285,6 +285,8 @@ export interface StatusReport {
     pendingHolds: number;
     /** v0.1.11: AppStatus.sliceRevision the app last reported (omitted before its first report); Core uses it for key transition tracking (BSD-15) */
     sliceRevision?: number;
+    /** v0.1.28 (F89): AppStatus.attention as the app last reported it (omitted when absent); Core shows it on the app card */
+    attention?: AppAttention;
   }[];
   /** presence booleans only — never values */
   keys: { name: string; ins: InstanceId; set: boolean }[];
@@ -487,6 +489,14 @@ export interface AppStatus {
   keysRev: number;
   /** items waiting for the owner, count only = held receipts + `pendingCount()` (v0.1.13, C86) */
   pendingHolds: number;
+  /** v0.1.28 (F89): app-reported condition the owner should see (from `defineApp({attention})`); present → readiness `degraded` */
+  attention?: AppAttention;
+}
+/** v0.1.28 (F89): `code` matches `^[a-z][a-z0-9_]{0,39}$`; `reason` is plain text ≤ 200 chars for the owner — never a
+ *  secret, a key name's value, raw upstream text or another app's data. */
+export interface AppAttention {
+  code: string;
+  reason: string;
 }
 /** 200 when the slice or keysRev changed; otherwise 204 after `wait`. */
 export interface AppStatusResponse {

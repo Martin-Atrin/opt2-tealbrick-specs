@@ -3,6 +3,7 @@
 // Declarations only: no runtime code. Vocabularies and manifest/credential shapes are imported, never re-declared.
 
 import type {
+  AppAttention,
   AppStatus,
   BridgeOp,
   BridgeOpBodies,
@@ -63,7 +64,7 @@ import type {
 } from "./manifest.ts";
 
 // Wire shapes owned by bridge.ts / credentials.ts / manifest.ts, re-exported for SDK users (not re-declared).
-export type { AppStatus, BridgeOp, BridgeOpBodies, CallEnvelope, ClaimRequest, ClaimResponse, HookRequest, HookResponseByPhase, InstanceSlice, OnBehalfOfContext, OpCallBody, OpResult, ScopeSummaryResult };
+export type { AppAttention, AppStatus, BridgeOp, BridgeOpBodies, CallEnvelope, ClaimRequest, ClaimResponse, HookRequest, HookResponseByPhase, InstanceSlice, OnBehalfOfContext, OpCallBody, OpResult, ScopeSummaryResult };
 
 // ════════════════════════════════════════════════════════════════════════════
 // §A  @opt2-tealbrick/manifest — pure, synchronous, no I/O
@@ -498,6 +499,11 @@ export interface AppDefinition<A extends string = never> {
   /** v0.1.13 (C86): items waiting for the owner beyond held receipts (0..10 000), added to AppStatus.pendingHolds.
    *  1 s timeout; an error or timeout counts 0 and logs a WARNING each time (rate-limited 1/min, suppressed count). */
   pendingCount?(db: Db): Promise<number>;
+  /** v0.1.28 (F89): a condition the owner should see while the app still serves (e.g. a degraded engine), or null.
+   *  Read at every status push (1 s timeout; an error or timeout counts as null and logs a WARNING, rate-limited 1/min).
+   *  Non-null → `AppStatus.attention` and readiness `degraded` (when health is otherwise `ok`). Call `ctx.statusChanged()`
+   *  when it changes. */
+  attention?(db: Db): Promise<AppAttention | null>;
 }
 export interface App {
   readonly manifest: Manifest;
@@ -615,7 +621,12 @@ export interface HoldsPendingOutput {
 
 // ── Cross-app context contracts (v0.1.13, SDK-API §18) ──
 /** Context key `rules.narrowing` (written by the app whose product id is `rules`). Knowledge (and any memory app) MUST
- *  filter read/recall results by `memoryTags`; an unknown `v` → refuse `narrowing_unsupported` (fail closed). */
+ *  filter read/recall results by `memoryTags`; an unknown `v` → refuse `narrowing_unsupported` (fail closed).
+ *  v0.1.28 (C150, SDK-API §18.4): writes are narrowed too — a write addressing a hidden item answers like a missing one;
+ *  a write whose result the writer could not read is refused with `narrowing_violation` (409). */
+/** G5 refusal codes (409): `narrowing_unsupported` = the call cannot honour the narrowing (§18.2, §18.4 c–e);
+ *  v0.1.28 (C150) `narrowing_violation` = a write whose result the caller could not read (§18.4 b, not retryable). */
+export type NarrowingRefusalCode = "narrowing_unsupported" | "narrowing_violation";
 export interface RulesNarrowingV1 {
   v: 1;
   ruleId: string;
