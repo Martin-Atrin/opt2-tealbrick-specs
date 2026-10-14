@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { Ajv2020 } from "ajv/dist/2020.js";
+import { SPEC_VERSION } from "../src/index.ts";
 import { STANDARD_OPERATIONS } from "../src/manifest.ts";
-import { HARNESS_OPTION_IDS, isHarnessOptionId, ROUTES } from "../src/routes.ts";
+import { HARNESS_OPTION_IDS, isHarnessOptionId, type ReleaseIndexEntry, type ReleaseIndexKind, ROUTES } from "../src/routes.ts";
 
 const dir = new URL("../schemas/", import.meta.url);
 const load = (f: string) => JSON.parse(readFileSync(new URL(f, dir), "utf8"));
@@ -44,4 +45,38 @@ test("harness option ids: one list, unique, canonical spelling, includes claude-
   assert.equal(isHarnessOptionId("claude-code"), true);
   // CLI runner kinds and old spellings are not harness options (no aliases, C133)
   for (const bad of ["claude-sdk", "command", "claude_code", "generic", "codex", "tealbrick_cli", "", null, 3]) assert.equal(isHarnessOptionId(bad), false, String(bad));
+});
+
+test("v0.1.29 (C174): a cli release-index entry is a valid ReleaseIndexEntry; the version constant matches package.json", () => {
+  const kinds: ReleaseIndexKind[] = ["app", "bridge", "desktop", "cli"];
+  const cli: ReleaseIndexEntry = {
+    id: "rel_01JA0000000000000000000009" as ReleaseIndexEntry["id"],
+    product: "cli" as ReleaseIndexEntry["product"],
+    kind: "cli",
+    version: "0.2.0",
+    channel: "stable",
+    manifestDigest: null,
+    manifestUrl: null,
+    skillsDigest: null,
+    image: null,
+    source: null,
+    artifact: {
+      url: "https://github.com/Martin-Atrin/opt2-tealbrick-dist/releases/download/opt2-tealbrick-cli-cli-v0.2.0/opt2-tealbrick-cli-0.2.0.tgz",
+      sha256: `sha256:${"a".repeat(64)}`,
+      integrity: `sha512-${"A".repeat(86)}==`,
+    },
+    services: null,
+    runtime: null,
+    minOs: null,
+    notarized: null,
+    upgradeFrom: "*",
+    repo: "Martin-Atrin/opt2-tealbrick-cli",
+    commit: "e".repeat(40),
+    tag: "cli-v0.2.0",
+    publishedAt: "2026-10-14T00:00:00.000Z" as ReleaseIndexEntry["publishedAt"],
+  };
+  assert.ok(kinds.includes(cli.kind));
+  assert.match(cli.artifact?.integrity ?? "", /^sha512-/);
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
+  assert.equal(SPEC_VERSION, pkg.version);
 });

@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.28 → v0.1.29 (C174: `cli` release-index kind)
+- `ReleaseIndexEntry.kind` adds `cli` (type `ReleaseIndexKind`): the tealbrick CLI tarball for the one-line installer and `tealbrick self-update` (C173). Product `cli`, tag `cli-v<version>`; only `artifact` is set, as `ReleaseArtifact {url, sha256: "sha256:<hex>", integrity: "sha512-<base64>"}` (`integrity` required for `cli`, absent on desktop entries); `url` is on the public dist host, never a private repo URL (C164). Additive: Core and other readers skip kinds they do not use (L24); `Release` (Core's API record) is unchanged.
+
 ## Changelog v0.1.27 → v0.1.28 (C150 security correction; F89 attention)
 - C150 (QA F90 S1): a `rules.narrowing` binds WRITES too (SDK-API §18.4 a–f). A write addressing an existing item checks visibility first and answers a hidden item exactly like a missing one (no existence oracle); a write whose result the caller could not read is refused `narrowing_violation` (409); collection-wide deletes, research writes under `anyOf` and engine-native writes answer `narrowing_unsupported`. 0.1.22–0.1.27 "writes ignore the narrowing" let a narrowed agent re-tag a hidden item and read it (L13). Type `NarrowingRefusalCode`.
 - F89 (L3): `AppStatus.attention? {code, reason}` (app-reported, from `defineApp({attention(db)})`, readiness `degraded` while present) and `StatusReport.apps[].attention?` (bridge copies it; Core shows it on the app card). Additive: an older bridge ignores the field and still sees readiness `degraded`.

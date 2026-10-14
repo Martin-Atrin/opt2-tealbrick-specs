@@ -562,10 +562,25 @@ export interface BridgeRuntimeRecord {
   volumes: { mountPath: string; backup: boolean }[];
   env: { name: string; source: "portal" | "provider-secret" | "public-url" | "public-url-keys" | "fixed"; value?: string }[];
 }
+/**
+ * v0.1.29 (C174): a downloadable release file. `sha256` = `sha256:<64 hex>`. `integrity` = the npm/pnpm lockfile value
+ * `sha512-<base64>` of the same bytes; REQUIRED for kind `cli`, absent on desktop entries.
+ */
+export interface ReleaseArtifact {
+  url: string;
+  sha256: string;
+  integrity?: string;
+}
+/**
+ * v0.1.29 (C174): index entry kinds. `cli` = the tealbrick CLI tarball (product `cli`) that the one-line installer and
+ * `tealbrick self-update` verify (C173): only `artifact` is set, its `url` is on the public dist host (never a private repo URL),
+ * `tag` = `cli-v<version>`. Readers skip kinds they do not use (L24); Core indexes app, bridge and desktop only.
+ */
+export type ReleaseIndexKind = "app" | "bridge" | "desktop" | "cli";
 export interface ReleaseIndexEntry {
   id: ReleaseId;
   product: ProductId;
-  kind: "app" | "bridge" | "desktop";
+  kind: ReleaseIndexKind;
   version: string;
   channel: "stable" | "dev";
   manifestDigest: Digest | null;
@@ -575,8 +590,8 @@ export interface ReleaseIndexEntry {
   image: string | null;
   /** dev channel only (C29) */
   source: ReleaseSourceRecord | null;
-  /** desktop only */
-  artifact: { url: string; sha256: string } | null;
+  /** desktop and cli (v0.1.29) only */
+  artifact: ReleaseArtifact | null;
   /** apps with companion services built as images: one image per service */
   services: { id: string; image: string }[] | null;
   /** kind bridge only */
