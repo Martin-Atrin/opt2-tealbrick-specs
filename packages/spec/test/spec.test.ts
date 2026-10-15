@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { SPEC_VERSION } from "../src/index.ts";
 import { STANDARD_OPERATIONS } from "../src/manifest.ts";
-import { type AccountMe, AUDIT_ACTIONS, HARNESS_OPTION_IDS, isHarnessOptionId, type Order, type ReleaseIndexEntry, type ReleaseIndexKind, ROUTES, type TermsAcceptInput } from "../src/routes.ts";
+import { type AccountMe, AUDIT_ACTIONS, type CheckoutInput, type DraftApplyInput, HARNESS_OPTION_IDS, isHarnessOptionId, type Order, type ReleaseIndexEntry, type ReleaseIndexKind, ROUTES, type TermsAcceptInput } from "../src/routes.ts";
 import type { BackupHealth, Health } from "../src/sdk.ts";
 
 const dir = new URL("../schemas/", import.meta.url);
@@ -118,4 +118,18 @@ test("v0.1.32 (C196 ENG-1/2/6): terms acceptance row, gate codes and optional Ac
   assert.equal(after.mfa?.required, true);
   const order: Pick<Order, "business"> = { business: { documents: input.documents, acceptedAt: "2026-10-15T00:00:00.000Z", name: "Novak Dental s.r.o.", taxIdProvided: true, checkoutTerms: "accepted" } };
   assert.equal(order.business?.checkoutTerms, "accepted");
+});
+
+test("v0.1.33 (C200): consumers too: buyer choice on checkout and draft apply, neutral tick, buyer type on the order", () => {
+  const business: CheckoutInput = { offerId: "off_1", returnPath: "/w", buyer: { type: "business", dpaAccepted: true } };
+  const consumer: CheckoutInput = { offerId: "off_1", returnPath: "/w", buyer: { type: "consumer", withdrawalWaiver: true } };
+  const draftStep: CheckoutInput = { offerId: "off_1", returnPath: "/w" };
+  const apply: DraftApplyInput = { drf: "drf_1", revision: 2, confirm: true, buyer: { type: "consumer", withdrawalWaiver: true } };
+  assert.equal(business.buyer?.type, "business");
+  assert.equal(draftStep.buyer, undefined);
+  assert.equal(apply.buyer?.type, "consumer");
+  const neutral: TermsAcceptInput = { documents: [{ doc: "terms", version: "1.1" }, { doc: "privacy", version: "1.1" }, { doc: "aup", version: "1.1" }] };
+  assert.equal(neutral.onBehalfOfBusiness, undefined);
+  const order: Pick<Order, "business"> = { business: { documents: neutral.documents, acceptedAt: "2026-10-15T00:00:00.000Z", name: null, taxIdProvided: null, checkoutTerms: "accepted", buyerType: "consumer", withdrawalWaiverAt: "2026-10-15T00:01:00.000Z" } };
+  assert.equal(order.business?.buyerType, "consumer");
 });

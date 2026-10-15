@@ -181,7 +181,7 @@ export interface AccountMe {
 }
 export interface SetCurrentWorkspaceInput { ws: WorkspaceId }
 /** v0.1.32 (C196 ENG-1): a legal document the account accepts, at one version. Core keeps the ONE list (its config constant). */
-export type LegalDocId = "terms" | "dpa" | "aup";
+export type LegalDocId = "terms" | "dpa" | "aup" | "privacy";
 export interface LegalDocument { doc: LegalDocId; version: string; title: string; url: string }
 export interface LegalDocumentRef { doc: LegalDocId; version: string }
 export interface AccountTerms {
@@ -191,6 +191,8 @@ export interface AccountTerms {
   accepted: boolean;
   /** time of the acceptance of the current set; null while not accepted */
   acceptedAt: IsoTime | null;
+  /** v0.1.33 (C200): documents a BUSINESS buyer accepts at checkout (the DPA); a consumer never does. */
+  businessDocuments?: LegalDocument[];
 }
 export interface AccountMfa {
   /** true when Core refuses owner sessions without a second factor */
@@ -199,8 +201,9 @@ export interface AccountMfa {
   enrolled: boolean | null;
 }
 /** v0.1.32 (C196 ENG-1): `documents` = exactly the current list the GUI showed (else 409 conflict, details.reason
- *  terms_changed + details.documents); `onBehalfOfBusiness` must be true (the person accepts for the business, Terms §1.3). */
-export interface TermsAcceptInput { documents: LegalDocumentRef[]; onBehalfOfBusiness: true }
+ *  terms_changed + details.documents). v0.1.33 (C200, consumers too): the tick is neutral; `onBehalfOfBusiness` is
+ *  optional and ignored (the buyer type is chosen at checkout). */
+export interface TermsAcceptInput { documents: LegalDocumentRef[]; onBehalfOfBusiness?: boolean }
 
 // workspaces
 export type BridgeState = "absent" | "deploying" | "awaiting_enrolment" | "online" | "offline" | "standalone";
@@ -824,7 +827,13 @@ export type LicenceList = Page<Licence>;
 export interface LicenceRef { lic: LicenceId }
 export interface LicenceTargetInput { lic: LicenceId; ws: WorkspaceId }
 export interface LicenceChange { licence: Licence; configRevisions: { ws: WorkspaceId; revision: number }[] }
-export interface CheckoutInput { offerId: OfferId; ws?: WorkspaceId; returnPath: string }
+/** v0.1.33 (C200): who buys. Business: the buyer ticks the DPA (`AccountTerms.businessDocuments`); Stripe asks for the business
+ *  name and a tax ID, both optional. Consumer: no business fields; the buyer ticks the withdrawal-right waiver ("I ask you to
+ *  start the service now and I understand that I lose my 14-day right of withdrawal once it starts."). */
+export type CheckoutBuyer = { type: "business"; dpaAccepted: true } | { type: "consumer"; withdrawalWaiver: true };
+/** v0.1.33 (C200): `buyer` is required by Core 0.1.33+ (400 validation_failed, details.reason buyer_required); optional in the
+ *  type so a draft step can omit it: drafts.apply supplies it (DraftApplyInput.buyer). */
+export interface CheckoutInput { offerId: OfferId; ws?: WorkspaceId; returnPath: string; buyer?: CheckoutBuyer }
 /** v0.1.9 (C60): Stripe customer portal (invoices, receipts). `returnPath` = path on the Portal origin (same rule as CheckoutInput). */
 export interface BillingPortalInput { returnPath: string }
 /** One-time Stripe portal link: bearer-like, never logged or stored (bodyLog none, not idempotent), browser only. */
@@ -855,7 +864,13 @@ export interface OrderBusiness {
   name: string | null;
   taxIdProvided: boolean | null;
   checkoutTerms: "accepted" | null;
+  /** v0.1.33 (C200): the buyer type chosen before checkout; omitted on orders before 0.1.33 (business only then) */
+  buyerType?: "business" | "consumer";
+  /** v0.1.33 (C200): consumer orders: time of the withdrawal-right waiver tick; null for business orders */
+  withdrawalWaiverAt?: IsoTime | null;
 }
+/** v0.1.33 (C200): the order evidence covers consumers too. */
+export type OrderBuyer = OrderBusiness;
 export interface UnpaidCount { ws: WorkspaceId; count: number; products: ProductId[] }
 /** Raw Stripe event body; verified with the sealed webhook secret before parsing. */
 export interface StripeEvent { id: string; type: string; livemode: boolean; data: { object: Record<string, unknown> } }
@@ -945,7 +960,9 @@ export interface DraftValidation {
   revision: number;
   issues: { n: number | null; code: ErrorCode; message: string; pointer: string | null }[];
 }
-export interface DraftApplyInput { drf: DraftId; revision: number; confirm: true }
+/** v0.1.33 (C200): `buyer` = the person's checkout choice, required when the draft has a payment step; it replaces any
+ *  `buyer` inside the draft's checkout steps (an agent never chooses it). */
+export interface DraftApplyInput { drf: DraftId; revision: number; confirm: true; buyer?: CheckoutBuyer }
 export interface DraftRejectInput { drf: DraftId; reason?: string }
 /** Exported recipe: steps without workspace-bound ids (`ws` stripped; other ids must be $refs). */
 export interface Recipe { format: "tealbrick.recipe/1"; title: string; description: string | null; steps: DraftStep[] }
