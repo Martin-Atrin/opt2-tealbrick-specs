@@ -5,6 +5,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { SPEC_VERSION } from "../src/index.ts";
 import { STANDARD_OPERATIONS } from "../src/manifest.ts";
 import { HARNESS_OPTION_IDS, isHarnessOptionId, type ReleaseIndexEntry, type ReleaseIndexKind, ROUTES } from "../src/routes.ts";
+import type { BackupHealth, Health } from "../src/sdk.ts";
 
 const dir = new URL("../schemas/", import.meta.url);
 const load = (f: string) => JSON.parse(readFileSync(new URL(f, dir), "utf8"));
@@ -90,4 +91,12 @@ test("v0.1.29 (C174): a cli release-index entry is a valid ReleaseIndexEntry; th
   assert.match(cli.artifact?.integrity ?? "", /^sha512-/);
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
   assert.equal(SPEC_VERSION, pkg.version);
+});
+
+test("v0.1.31 (SDK-03): Health.backup is optional and additive", () => {
+  const backup: BackupHealth = { schedule: "ok", lastOkAt: null, lastFailedAt: "2026-10-15T03:17:01.000Z" as BackupHealth["lastFailedAt"], lastError: "backup_failed", failures: 1, overdue: false };
+  const old: Health = { status: "ok", sdk: "0.1.21", version: "1.0.0", manifestDigest: `sha256:${"0".repeat(64)}` as Health["manifestDigest"], keys: [] };
+  const now: Health = { ...old, backup };
+  assert.equal(old.backup, undefined);
+  assert.equal(now.backup?.failures, 1);
 });

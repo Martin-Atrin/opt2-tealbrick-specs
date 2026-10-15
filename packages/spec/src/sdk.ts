@@ -586,7 +586,9 @@ export interface ReceiptQuery {
 export interface ReceiptStore {
   get(id: Receipt["id"]): Promise<Receipt | null>;
   list(q: ReceiptQuery): Promise<{ items: Receipt[]; nextCursor: string | null }>;
-  /** counters for authorize(): receipts with status run|approved per effect inside each cap window */
+  /** counters for authorize() inside each cap window. v0.1.31 (SDK-02): the caller's cap slots — every run of a
+   *  write/outward/destructive op, receipt or not, reserved before the handler, given back when the run fails or is
+   *  refused — plus its approved, unconsumed holds of that effect (was: receipts with status run|approved). */
   usage(caller: AgentId | InstanceId, caps: FreeCaps, now: number): Promise<Partial<Record<Effect, number>>>;
   holdStatus(caller: AgentId | InstanceId, holdId: string): Promise<{ status: ReceiptStatus; decidedAt: number | null; expiresAt: number | null } | null>;
 }
@@ -709,6 +711,22 @@ export interface Health {
   keys: KeyStatus[];
   /** v0.1.12: present only while the instance needs the owner (status `needs_claim`; wire readiness `degraded`) */
   attention?: AttentionCode;
+  /** v0.1.31 (SDK-03, miniapp-sdk 0.1.22): scheduled-backup state; omitted by SDKs before 0.1.22 */
+  backup?: BackupHealth;
+}
+/** v0.1.31 (SDK-03, L3): a failed, overdue or unparsable scheduled backup is never silent. The same condition rides
+ *  `AppStatus.attention` (codes `backup_failed`, `backup_overdue`, `backup_schedule_invalid`, `backup_schedule_never`). */
+export interface BackupHealth {
+  /** `invalid`: `backups.schedule` does not parse; `never_fires`: it parses but has no next run — no scheduled backup runs */
+  schedule: "ok" | "invalid" | "never_fires";
+  lastOkAt: IsoTime | null;
+  lastFailedAt: IsoTime | null;
+  /** error code of the newest failed run (never a message), null after a good run */
+  lastError: string | null;
+  /** failed runs (scheduled or `runNow`) since the newest good backup */
+  failures: number;
+  /** no good backup for more than two schedule periods (counted from the first tracked start when none ran yet) */
+  overdue: boolean;
 }
 /** v0.1.12 claim guard: data dir not on a mounted volume, or the bridge refused the stored identity (same code). */
 export type AttentionCode = "data_dir_not_mounted" | "identity_refused";
