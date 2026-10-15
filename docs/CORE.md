@@ -2,6 +2,9 @@
 
 Status: v0.1 (Lead · Specs, 2026-10-11). Authority order: PRD-V2 > DECISION-LOG > this file > the per-topic specs. Every other spec in `specs/` MUST agree with this file; if it cannot, it raises the conflict in its "Open questions" section instead of deviating.
 
+## Changelog v0.1.29 → v0.1.30 (C181: `package` release-index kind)
+- `ReleaseIndexKind` adds `package`: an npm library tarball that other repos depend on by its dist URL (products `relay`, `harness-claude`, `harness-eve`, released from the private CLI repo; the private bridge and TBD depend on `relay`). Same shape and rules as `cli`: only `artifact {url, sha256, integrity}`, `url` = `<dist base>/opt2-tealbrick-cli-<product>-v<version>/opt2-tealbrick-<product>-<version>.tgz` on the public dist host, `tag` = `<product>-v<version>`. Additive: Core, the installer and `self-update` skip it (L24).
+
 ## Changelog v0.1.28 → v0.1.29 (C174: `cli` release-index kind)
 - `ReleaseIndexEntry.kind` adds `cli` (type `ReleaseIndexKind`): the tealbrick CLI tarball for the one-line installer and `tealbrick self-update` (C173). Product `cli`, tag `cli-v<version>`; only `artifact` is set, as `ReleaseArtifact {url, sha256: "sha256:<hex>", integrity: "sha512-<base64>"}` (`integrity` required for `cli`, absent on desktop entries); `url` is on the public dist host, never a private repo URL (C164). Additive: Core and other readers skip kinds they do not use (L24); `Release` (Core's API record) is unchanged.
 

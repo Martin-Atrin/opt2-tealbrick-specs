@@ -76,6 +76,17 @@ test("v0.1.29 (C174): a cli release-index entry is a valid ReleaseIndexEntry; th
     publishedAt: "2026-10-14T00:00:00.000Z" as ReleaseIndexEntry["publishedAt"],
   };
   assert.ok(kinds.includes(cli.kind));
+  // v0.1.30 (C181): kind package, same shape as cli
+  const relay: ReleaseIndexEntry = {
+    ...cli,
+    product: "relay" as ReleaseIndexEntry["product"],
+    kind: "package",
+    version: "0.1.0",
+    artifact: { ...(cli.artifact as NonNullable<ReleaseIndexEntry["artifact"]>), url: "https://github.com/Martin-Atrin/opt2-tealbrick-dist/releases/download/opt2-tealbrick-cli-relay-v0.1.0/opt2-tealbrick-relay-0.1.0.tgz" },
+    tag: "relay-v0.1.0",
+  };
+  const allKinds: ReleaseIndexKind[] = [...kinds, "package"];
+  assert.ok(allKinds.includes(relay.kind));
   assert.match(cli.artifact?.integrity ?? "", /^sha512-/);
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version: string };
   assert.equal(SPEC_VERSION, pkg.version);
