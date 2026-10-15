@@ -191,7 +191,7 @@ export interface AccountTerms {
   accepted: boolean;
   /** time of the acceptance of the current set; null while not accepted */
   acceptedAt: IsoTime | null;
-  /** v0.1.33 (C200): documents a BUSINESS buyer accepts at checkout (the DPA); a consumer never does. */
+  /** v0.1.33 (C200), DEPRECATED in 0.1.34: legal v1.1 accepts every document (DPA included) with one tick; Core omits it. */
   businessDocuments?: LegalDocument[];
 }
 export interface AccountMfa {
@@ -550,6 +550,9 @@ export interface CatalogEntry {
   workspace?: {
     licence: "none" | "unassigned_available" | "assigned";
     licenceId: LicenceId | null;
+    /** v0.1.34 (C200, Terms 9A.3): the assigned licence entitles only from this time (a consumer who did not ask for
+     *  immediate supply); null/absent = entitles now. `licence` is "assigned" meanwhile (no second purchase). */
+    licenceActiveFrom?: IsoTime | null;
     deployment: DeploymentView;
     instanceId: InstanceId | null;
     releaseId: ReleaseId | null;
@@ -821,16 +824,21 @@ export interface Licence {
   assignment: { ws: WorkspaceId; workspaceName: string; assignedAt: IsoTime } | null;
   livemode: boolean;
   createdAt: IsoTime;
+  /** v0.1.34 (C200, Terms 9A.3): not-before time; the licence entitles only from then (isEntitled honours it). */
+  activeFrom?: IsoTime | null;
 }
 export type LicenceListInput = PageQuery & { product?: ProductId; assigned?: boolean };
 export type LicenceList = Page<Licence>;
 export interface LicenceRef { lic: LicenceId }
 export interface LicenceTargetInput { lic: LicenceId; ws: WorkspaceId }
 export interface LicenceChange { licence: Licence; configRevisions: { ws: WorkspaceId; revision: number }[] }
-/** v0.1.33 (C200): who buys. Business: the buyer ticks the DPA (`AccountTerms.businessDocuments`); Stripe asks for the business
- *  name and a tax ID, both optional. Consumer: no business fields; the buyer ticks the withdrawal-right waiver ("I ask you to
- *  start the service now and I understand that I lose my 14-day right of withdrawal once it starts."). */
-export type CheckoutBuyer = { type: "business"; dpaAccepted: true } | { type: "consumer"; withdrawalWaiver: true };
+/** v0.1.34 (C200, legal v1.1 Terms 1.2, 1.3, 9A.3; replaces the 0.1.33 union, which nothing used). The three checkout boxes,
+ *  all unticked at first: `termsAccepted` = the acceptance box again at checkout (must be true); `business` = the optional
+ *  "I am buying for my trade, business or profession." (a VAT/tax ID given at Stripe also makes the buyer a business);
+ *  `immediateSupply` = the consumer box "I ask Tealbrick to start supplying this licence immediately, before the 14-day
+ *  withdrawal period ends. I acknowledge that I lose my right of withdrawal once supply has started." (only when not
+ *  business; unticked → the purchase completes and the licence entitles only after the withdrawal period). */
+export interface CheckoutBuyer { termsAccepted: true; business: boolean; immediateSupply?: boolean }
 /** v0.1.33 (C200): `buyer` is required by Core 0.1.33+ (400 validation_failed, details.reason buyer_required); optional in the
  *  type so a draft step can omit it: drafts.apply supplies it (DraftApplyInput.buyer). */
 export interface CheckoutInput { offerId: OfferId; ws?: WorkspaceId; returnPath: string; buyer?: CheckoutBuyer }
@@ -866,8 +874,14 @@ export interface OrderBusiness {
   checkoutTerms: "accepted" | null;
   /** v0.1.33 (C200): the buyer type chosen before checkout; omitted on orders before 0.1.33 (business only then) */
   buyerType?: "business" | "consumer";
-  /** v0.1.33 (C200): consumer orders: time of the withdrawal-right waiver tick; null for business orders */
+  /** v0.1.33 (C200): consumer orders: time of the immediate-supply request + acknowledgement tick (Terms 9A.3); null otherwise */
   withdrawalWaiverAt?: IsoTime | null;
+  /** v0.1.34: the buyer ticked the business box (a VAT ID at Stripe can make buyerType business without it) */
+  businessDeclared?: boolean;
+  /** v0.1.34: time of the acceptance box ticked again at checkout */
+  checkoutAcceptedAt?: IsoTime;
+  /** v0.1.34: the order's licences entitle from this time (consumer without immediate supply); null = at once */
+  licenceActiveFrom?: IsoTime | null;
 }
 /** v0.1.33 (C200): the order evidence covers consumers too. */
 export type OrderBuyer = OrderBusiness;

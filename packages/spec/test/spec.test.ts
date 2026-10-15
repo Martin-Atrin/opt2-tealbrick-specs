@@ -120,16 +120,19 @@ test("v0.1.32 (C196 ENG-1/2/6): terms acceptance row, gate codes and optional Ac
   assert.equal(order.business?.checkoutTerms, "accepted");
 });
 
-test("v0.1.33 (C200): consumers too: buyer choice on checkout and draft apply, neutral tick, buyer type on the order", () => {
-  const business: CheckoutInput = { offerId: "off_1", returnPath: "/w", buyer: { type: "business", dpaAccepted: true } };
-  const consumer: CheckoutInput = { offerId: "off_1", returnPath: "/w", buyer: { type: "consumer", withdrawalWaiver: true } };
+test("v0.1.34 (C200, legal v1.1): three checkout boxes, licence not-before, order evidence", () => {
+  const consumer: CheckoutInput = { offerId: "off_1", returnPath: "/w", buyer: { termsAccepted: true, business: false, immediateSupply: false } };
+  const business: CheckoutInput = { offerId: "off_1", returnPath: "/w", buyer: { termsAccepted: true, business: true } };
   const draftStep: CheckoutInput = { offerId: "off_1", returnPath: "/w" };
-  const apply: DraftApplyInput = { drf: "drf_1", revision: 2, confirm: true, buyer: { type: "consumer", withdrawalWaiver: true } };
-  assert.equal(business.buyer?.type, "business");
+  const apply: DraftApplyInput = { drf: "drf_1", revision: 2, confirm: true, buyer: { termsAccepted: true, business: false, immediateSupply: true } };
+  assert.equal(consumer.buyer?.immediateSupply, false);
+  assert.equal(business.buyer?.business, true);
   assert.equal(draftStep.buyer, undefined);
-  assert.equal(apply.buyer?.type, "consumer");
-  const neutral: TermsAcceptInput = { documents: [{ doc: "terms", version: "1.1" }, { doc: "privacy", version: "1.1" }, { doc: "aup", version: "1.1" }] };
-  assert.equal(neutral.onBehalfOfBusiness, undefined);
-  const order: Pick<Order, "business"> = { business: { documents: neutral.documents, acceptedAt: "2026-10-15T00:00:00.000Z", name: null, taxIdProvided: null, checkoutTerms: "accepted", buyerType: "consumer", withdrawalWaiverAt: "2026-10-15T00:01:00.000Z" } };
-  assert.equal(order.business?.buyerType, "consumer");
+  assert.equal(apply.buyer?.immediateSupply, true);
+  const accept: TermsAcceptInput = { documents: [{ doc: "terms", version: "1.1" }, { doc: "aup", version: "1.1" }, { doc: "privacy", version: "1.1" }, { doc: "dpa", version: "1.1" }] };
+  assert.equal(accept.onBehalfOfBusiness, undefined);
+  const order: Pick<Order, "business"> = {
+    business: { documents: accept.documents, acceptedAt: "2026-10-15T00:00:00.000Z", name: null, taxIdProvided: false, checkoutTerms: null, buyerType: "consumer", withdrawalWaiverAt: null, businessDeclared: false, checkoutAcceptedAt: "2026-10-15T00:01:00.000Z", licenceActiveFrom: "2026-10-30T00:00:00.000Z" },
+  };
+  assert.equal(order.business?.licenceActiveFrom, "2026-10-30T00:00:00.000Z");
 });
