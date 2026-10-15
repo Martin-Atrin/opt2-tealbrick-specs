@@ -5,7 +5,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { SPEC_VERSION } from "../src/index.ts";
 import { STANDARD_OPERATIONS } from "../src/manifest.ts";
 import { type AccountMe, AUDIT_ACTIONS, type CheckoutInput, type DraftApplyInput, HARNESS_OPTION_IDS, isHarnessOptionId, type Order, type ReleaseIndexEntry, type ReleaseIndexKind, ROUTES, type TermsAcceptInput } from "../src/routes.ts";
-import type { BackupHealth, Health } from "../src/sdk.ts";
+import type { BackupHealth, DynamicHandlers, DynamicHoldView, Health } from "../src/sdk.ts";
 
 const dir = new URL("../schemas/", import.meta.url);
 const load = (f: string) => JSON.parse(readFileSync(new URL(f, dir), "utf8"));
@@ -135,4 +135,13 @@ test("v0.1.34 (C200, legal v1.1): three checkout boxes, licence not-before, orde
     business: { documents: accept.documents, acceptedAt: "2026-10-15T00:00:00.000Z", name: null, taxIdProvided: false, checkoutTerms: null, buyerType: "consumer", withdrawalWaiverAt: null, businessDeclared: false, checkoutAcceptedAt: "2026-10-15T00:01:00.000Z", licenceActiveFrom: "2026-10-30T00:00:00.000Z" },
   };
   assert.equal(order.business?.licenceActiveFrom, "2026-10-30T00:00:00.000Z");
+});
+
+test("v0.1.35 (SDK-HV-1): DynamicHandlers.holdView is optional and async; DynamicHoldView {summary?, view}", async () => {
+  const base: DynamicHandlers = { catalog: async () => [], resolve: async () => null, call: async () => null };
+  assert.equal(base.holdView, undefined);
+  const withView: DynamicHandlers = { ...base, holdView: async (tool) => (tool === "x" ? { view: "To: a@b.c" } : null) };
+  const v: DynamicHoldView | null | undefined = await withView.holdView?.("x", {}, {} as Parameters<NonNullable<DynamicHandlers["holdView"]>>[2]);
+  assert.deepEqual(v, { view: "To: a@b.c" });
+  assert.equal(v?.summary, undefined);
 });

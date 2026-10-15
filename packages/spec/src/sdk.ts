@@ -452,10 +452,26 @@ export interface HookContext {
 export type HookHandler = (req: HookRequest, ctx: HookContext) => Promise<HookResponseByPhase[HookRequest["phase"]]>;
 
 // ── Dynamic ops (CORE §13) ──
+/** v0.1.35 (SDK-HV-1): what the owner sees on a hold of a dynamic tool call (SDK-API §4.6). */
+export interface DynamicHoldView {
+  /** hold summary (≤ 280; longer is clamped); default = op title */
+  summary?: string;
+  /** hold view text, plain text (≤ 16 000) */
+  view: string;
+}
 export interface DynamicHandlers {
   catalog(query: DynamicSearchInput | null, ctx: HookContext): Promise<DynamicCatalogEntry[]>;
   resolve(tool: string, ctx: HookContext): Promise<DynamicResolution | null>;
   call(tool: string, args: DynamicCallInput["arguments"], ctx: OpContext): Promise<Json>;
+  /**
+   * v0.1.35 (SDK-HV-1, optional): the owner-facing hold text for a held call of `tool` — the app may READ upstream content
+   * (e.g. the mail draft a send would deliver) with the same account the call would use. Awaited by the SDK with a time
+   * budget (`ctx.signal`, 5 s). `null` = no special view (the SDK shows op title + arguments). A throw, a timeout or a view
+   * over 16 000 chars → the SDK shows op title + arguments plus the line "Tealbrick could not read the content of this
+   * request"; the hold is created either way (never blocked, never approved). The approval is bound to sha256(view): when
+   * the approved call is repeated the SDK computes the view again and runs only if it is the same text, else it holds again.
+   */
+  holdView?(tool: string, args: DynamicCallInput["arguments"], ctx: OpContext): Promise<DynamicHoldView | null>;
 }
 
 // ── Public routes (manifest publicRoutes; app verifies) ──
