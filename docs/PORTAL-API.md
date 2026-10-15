@@ -60,10 +60,10 @@ One envelope everywhere (CORE §8): `{ "error": { "code": "<snake_case>", "messa
 | 400 | `bad_request`, `validation_failed`, `idempotency_key_required`, `draft_invalid`, `draft_op_not_draftable`, `draft_ref_invalid`, `draft_ref_money`, `recipe_not_portable`, `policy_invalid`, `authorization_pending`, `slow_down`, `access_denied`, `expired_token` (RFC 8628 codes, carried as `error.code`) |
 | 401 | `unauthenticated`, `bridge_key_revoked`, `enrolment_code_invalid`, `stripe_signature_invalid`, `clerk_signature_invalid` (v0.1.4) |
 | 402 | `licence_required` |
-| 403 | `forbidden` (wrong auth class for the row), `account_disabled` (v0.1.4, C49) |
+| 403 | `forbidden` (wrong auth class for the row), `account_disabled` (v0.1.4, C49), `mfa_required` (v0.1.32, C196) |
 | 404 | `not_found` |
 | 405 | `method_not_allowed` (known path, wrong method; v0.1.4, C46) |
-| 409 | `conflict`, `revision_conflict`, `idempotency_conflict`, `licence_already_assigned`, `licence_not_active`, `workspace_paused`, `workspace_standalone`, `workspace_not_empty`, `bridge_not_ready`, `destination_in_use`, `deploy_in_progress`, `instance_exists`, `draft_state` |
+| 409 | `conflict`, `revision_conflict`, `idempotency_conflict`, `licence_already_assigned`, `licence_not_active`, `workspace_paused`, `workspace_standalone`, `workspace_not_empty`, `bridge_not_ready`, `destination_in_use`, `deploy_in_progress`, `instance_exists`, `draft_state`, `terms_not_accepted` (v0.1.32, C196) |
 | 413 / 429 | `payload_too_large` / `rate_limited` |
 | 422 | `manifest_invalid`, `release_not_deployable`, `offer_unavailable` |
 | 502 / 504 | `provider_unavailable`, `provider_reauth_required`, `provider_not_linked` (409 when no link), `checkout_failed` / `upstream_timeout` |
@@ -449,3 +449,10 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 
 ## v0.1.24 additions (C117)
 - `hookSubscriptions` / config `hooks[]`: every declared hook of every DEPLOYED app (any run state, also after a licence lapse) with `enabled` = the owner switch (`hooks.set`). A hook disappears only when the owner switches it off (then listed `enabled: false`) or removes the app. Every change that can affect the list bumps the config revision.
+
+## v0.1.32 additions (C196: ENG-1, ENG-2, ENG-6 of the legal texts v1.0)
+- Route `account.terms_accept` (`POST /me/terms`, browser only, registry Consent, audit `account.terms_accept`, input `TermsAcceptInput {documents: LegalDocumentRef[], onBehalfOfBusiness: true}`, output `AccountMe`). Core keeps ONE list of the current legal documents (doc id, version, title, URL) and records one row per document: account id, document, version, time. No IP address and no IP hash (Privacy Policy §9: "the version … and the time of acceptance"). `documents` must equal the current list exactly; otherwise `409 conflict` (`details.reason: "terms_changed"`, `details.documents` = the current list) and the GUI shows the new list.
+- `AccountMe.terms?: AccountTerms {current, accepted, acceptedAt}` and `AccountMe.mfa?: AccountMfa {required, enrolled}` (optional: a Core before 0.1.32 omits them; the GUI then shows no gate).
+- Terms gate: until the account accepted the current list, every mutating browser or owner-CLI op answers `409 terms_not_accepted` (`details.documents`). Exempt: `account.terms_accept` and the safety and exit ops (`owner_sessions.logout`, `owner_sessions.revoke`, `connections.revoke`, `device.deny`, `agents.pause`, `workspaces.pause`). Reads stay open. A new version of any document re-opens the gate at the next request (Terms §20.1). Bridge, device, public and webhook principals are never gated.
+- MFA gate (Terms §4.2): with Core's `TB_REQUIRE_MFA` on, a browser or owner-CLI request of a person whose Clerk user has no second factor (TOTP, backup codes, SMS code or a passkey) answers `403 mfa_required`, except `account.me` (the GUI reads the gate there) and `owner_sessions.logout`. The GUI sends the person to Account › Profile & security to add one.
+- `checkout.create` requires the terms acceptance (`409 terms_not_accepted`). The Stripe Checkout Session collects the business name (required), a tax ID where Stripe supports it for the buyer's country, and the checkout terms tick. `Order.business?: OrderBusiness` carries the evidence (the tax ID itself stays at Stripe).

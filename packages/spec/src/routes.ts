@@ -122,6 +122,8 @@ export const AUDIT_ACTIONS = [
   "owner_session.create", "owner_session.revoke",
   "draft.create", "draft.update", "draft.submit", "draft.apply", "draft.apply_step",
   "draft.reject", "draft.import",
+  /** v0.1.32 (C196 ENG-1): the account accepted the current legal documents (Terms, DPA, AUP) for its business */
+  "account.terms_accept",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 
@@ -143,6 +145,10 @@ export type ErrorCode =
   | "path_invalid"
   /** v0.1.13 (C82): instances.consent for a consent the release does not ask for */
   | "consent_not_requested"
+  /** v0.1.32 (C196 ENG-1): 409, the account has not accepted the current legal documents (details.documents lists them) */
+  | "terms_not_accepted"
+  /** v0.1.32 (C196 ENG-6): 403, the owner has no second sign-in factor while Core requires one (TB_REQUIRE_MFA) */
+  | "mfa_required"
   | "internal";
 /** CORE §8: the one error envelope. */
 export interface ErrorEnvelope { error: { code: ErrorCode; message: string; requestId: string; details?: Record<string, unknown> } }
@@ -168,8 +174,33 @@ export interface AccountMe {
   firstSignIn: boolean;
   currentWorkspaceId: WorkspaceId | null;
   workspaceCount: number;
+  /** v0.1.32 (C196 ENG-1): the legal documents the account must accept and whether it did; omitted by Core before 0.1.32. */
+  terms?: AccountTerms;
+  /** v0.1.32 (C196 ENG-6): the second-factor gate; omitted by Core before 0.1.32. */
+  mfa?: AccountMfa;
 }
 export interface SetCurrentWorkspaceInput { ws: WorkspaceId }
+/** v0.1.32 (C196 ENG-1): a legal document the account accepts, at one version. Core keeps the ONE list (its config constant). */
+export type LegalDocId = "terms" | "dpa" | "aup";
+export interface LegalDocument { doc: LegalDocId; version: string; title: string; url: string }
+export interface LegalDocumentRef { doc: LegalDocId; version: string }
+export interface AccountTerms {
+  /** every document the account must accept now, at its current version */
+  current: LegalDocument[];
+  /** true when the account accepted every current document at its current version */
+  accepted: boolean;
+  /** time of the acceptance of the current set; null while not accepted */
+  acceptedAt: IsoTime | null;
+}
+export interface AccountMfa {
+  /** true when Core refuses owner sessions without a second factor */
+  required: boolean;
+  /** Clerk reports a second factor (TOTP, backup codes, SMS code or a passkey); null when not checked (required false) */
+  enrolled: boolean | null;
+}
+/** v0.1.32 (C196 ENG-1): `documents` = exactly the current list the GUI showed (else 409 conflict, details.reason
+ *  terms_changed + details.documents); `onBehalfOfBusiness` must be true (the person accepts for the business, Terms §1.3). */
+export interface TermsAcceptInput { documents: LegalDocumentRef[]; onBehalfOfBusiness: true }
 
 // workspaces
 export type BridgeState = "absent" | "deploying" | "awaiting_enrolment" | "online" | "offline" | "standalone";
@@ -812,6 +843,18 @@ export interface Order {
   assignTo: WorkspaceId | null;
   createdAt: IsoTime;
   paidAt: IsoTime | null;
+  /** v0.1.32 (C196 ENG-2): the business evidence stored with the order; omitted by Core before 0.1.32. */
+  business?: OrderBusiness;
+}
+/** v0.1.32 (C196 ENG-2): Terms §1.2-1.3 evidence. `documents` = what the account had accepted when checkout started
+ *  (Core refuses checkout without it: 409 terms_not_accepted). After payment: the business name Stripe collected, whether a
+ *  tax ID was given (the tax ID itself stays at Stripe) and the checkout terms tick (`accepted`, null = not collected). */
+export interface OrderBusiness {
+  documents: LegalDocumentRef[];
+  acceptedAt: IsoTime;
+  name: string | null;
+  taxIdProvided: boolean | null;
+  checkoutTerms: "accepted" | null;
 }
 export interface UnpaidCount { ws: WorkspaceId; count: number; products: ProductId[] }
 /** Raw Stripe event body; verified with the sealed webhook secret before parsing. */
@@ -957,7 +1000,7 @@ export interface DeployWorkerHealth {
 export interface SchemaMap {
   Empty: Empty; Ok: Ok; WorkspaceRef: WorkspaceRef; AgentRef: AgentRef; InstanceRef: InstanceRef;
   ProviderRef: ProviderRef; ConfigChange: ConfigChange;
-  AccountMe: AccountMe; SetCurrentWorkspaceInput: SetCurrentWorkspaceInput;
+  AccountMe: AccountMe; SetCurrentWorkspaceInput: SetCurrentWorkspaceInput; TermsAcceptInput: TermsAcceptInput;
   Workspace: Workspace; WorkspaceListInput: WorkspaceListInput; WorkspaceList: WorkspaceList;
   WorkspaceCreateInput: WorkspaceCreateInput; WorkspaceUpdateInput: WorkspaceUpdateInput;
   SetInfrastructureInput: SetInfrastructureInput; CostEstimateInput: CostEstimateInput; CostEstimate: CostEstimate;
@@ -1033,6 +1076,8 @@ export const ROUTES = [
   // account
   { opId: "account.me", method: "GET", path: "/me", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "AccountMe", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
   { opId: "account.set_current_workspace", method: "PUT", path: "/me/current-workspace", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "SetCurrentWorkspaceInput", output: "AccountMe", rate: "write", bodyLog: "meta", audit: "account.set_current_workspace", draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  /** v0.1.32 (C196 ENG-1): the person ticks "I accept … on behalf of my business"; Core records account, document versions, time (no IP). */
+  { opId: "account.terms_accept", method: "POST", path: "/me/terms", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "TermsAcceptInput", output: "AccountMe", rate: "write", bodyLog: "meta", audit: "account.terms_accept", draftable: false, confirm: false, idempotent: false, registry: "consent" },
 
   // workspaces
   { opId: "workspaces.list", method: "GET", path: "/workspaces", auth: BO, exposure: "gateway", transport: "json", query: PAGE, input: "WorkspaceListInput", output: "WorkspaceList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },

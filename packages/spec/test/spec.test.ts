@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { SPEC_VERSION } from "../src/index.ts";
 import { STANDARD_OPERATIONS } from "../src/manifest.ts";
-import { HARNESS_OPTION_IDS, isHarnessOptionId, type ReleaseIndexEntry, type ReleaseIndexKind, ROUTES } from "../src/routes.ts";
+import { type AccountMe, AUDIT_ACTIONS, HARNESS_OPTION_IDS, isHarnessOptionId, type Order, type ReleaseIndexEntry, type ReleaseIndexKind, ROUTES, type TermsAcceptInput } from "../src/routes.ts";
 import type { BackupHealth, Health } from "../src/sdk.ts";
 
 const dir = new URL("../schemas/", import.meta.url);
@@ -99,4 +99,23 @@ test("v0.1.31 (SDK-03): Health.backup is optional and additive", () => {
   const now: Health = { ...old, backup };
   assert.equal(old.backup, undefined);
   assert.equal(now.backup?.failures, 1);
+});
+
+test("v0.1.32 (C196 ENG-1/2/6): terms acceptance row, gate codes and optional AccountMe/Order fields", () => {
+  const row = ROUTES.find((r) => r.opId === "account.terms_accept");
+  assert.ok(row);
+  assert.equal(row.method, "POST");
+  assert.equal(row.path, "/me/terms");
+  assert.deepEqual([...row.auth], ["browser"]); // a person ticks the box; never the owner CLI, never a draft
+  assert.equal(row.draftable, false);
+  assert.equal(row.audit, "account.terms_accept");
+  assert.ok((AUDIT_ACTIONS as readonly string[]).includes("account.terms_accept"));
+  const input: TermsAcceptInput = { documents: [{ doc: "terms", version: "1.0" }, { doc: "dpa", version: "1.0" }, { doc: "aup", version: "1.0" }], onBehalfOfBusiness: true };
+  assert.equal(input.documents.length, 3);
+  const before: AccountMe = { account: { id: "acc_1", createdAt: "2026-10-15T00:00:00.000Z" }, person: { id: "per_1", email: "", name: null, imageUrl: null }, firstSignIn: true, currentWorkspaceId: null, workspaceCount: 0 };
+  const after: AccountMe = { ...before, terms: { current: [{ doc: "terms", version: "1.0", title: "Terms of Service", url: "https://tealbrick.com/terms" }], accepted: false, acceptedAt: null }, mfa: { required: true, enrolled: false } };
+  assert.equal(before.terms, undefined);
+  assert.equal(after.mfa?.required, true);
+  const order: Pick<Order, "business"> = { business: { documents: input.documents, acceptedAt: "2026-10-15T00:00:00.000Z", name: "Novak Dental s.r.o.", taxIdProvided: true, checkoutTerms: "accepted" } };
+  assert.equal(order.business?.checkoutTerms, "accepted");
 });
