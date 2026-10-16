@@ -3,7 +3,7 @@
   "version": "0.1.39",
   "private": true,
   "description": "Teal Brick opt2 frozen interface contract: JSON Schemas, TypeScript types, route table, vocabularies (data only).",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
   "type": "module",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
@@ -16,7 +16,7 @@
     "./schemas/*": "./schemas/*",
     "./examples/*": "./examples/*"
   },
-  "files": ["dist", "schemas", "examples"],
+  "files": ["dist", "schemas", "examples", "NOTICE"],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",

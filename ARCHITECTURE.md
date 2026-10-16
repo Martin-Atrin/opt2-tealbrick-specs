@@ -35,4 +35,4 @@ Direct pins of `@opt2-tealbrick/spec` on 2026-10-17: 0.1.39 in portal-core, brid
 - `docs/PORTAL-API.md` (Agent Policy and C105 notes) lists three default held families (`destructive`, `money`, `first_contact`); `DEFAULT_HELD_FAMILIES` in `manifest.ts` has four (plus `identity`).
 - Spec 0.1.39 exports only types for the upgrade-safety members, plus the `BOOT_FAILURE_ATTENTION` constant (no runtime phase list, no validators, no JSON Schema). The bridge keeps local shape checks typed against them.
 - N12 (licence per major) is closed in the decision log (a lifetime licence covers the major bought), but `docs/FROZEN`, `docs/CORE.md` and `docs/PORTAL-API.md` still say it waits on the owner.
-- Licence: `package.json` declares MIT and no `LICENSE` file exists in the repo or the package, while decision C191 sets the Tealbrick SDK Licence (see README).
+- Licence: the repo and the package have `LICENSE` (Tealbrick Software Licence) and `NOTICE`, and `package.json` declares `"license": "SEE LICENSE IN LICENSE"`; versions released earlier stay MIT (see `LICENSING.md`).
