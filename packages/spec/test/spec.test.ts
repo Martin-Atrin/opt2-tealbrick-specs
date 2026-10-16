@@ -199,3 +199,29 @@ test("v0.1.38 (C184 §4/§5, Admin S3): GDPR + CRA rows; personal-data and destr
   assert.equal(admin.CRA_NOTIFICATION_HOURS, 72);
   assert.ok(admin.ADMIN_ROUTES.length >= 36);
 });
+
+test("v0.1.39 (C213 US-1..4): upgrade-safety fields are optional and additive; failed-mode health; Instance.lastUpdate", async () => {
+  const bridge = await import("../src/bridge.ts");
+  assert.deepEqual([...bridge.BOOT_FAILURE_ATTENTION].sort(), ["migration_failed", "migration_locked", "preupdate_snapshot_failed", "preupdate_snapshot_no_space", "restore_failed", "schema_newer"]);
+  // an AppStatus of an SDK before 0.1.25 stays valid; one from 0.1.25 carries the new members
+  const old: import("../src/bridge.ts").AppStatus = { readiness: "ready", version: "1.0.0", sdkVersion: "0.1.24", scopesRev: 0, sliceRevision: 0, keysRev: 0, pendingHolds: 0 };
+  const failed: import("../src/bridge.ts").AppStatus = {
+    ...old,
+    readiness: "degraded",
+    attention: { code: "migration_failed", reason: "The update could not change the stored data." },
+    schemaVersion: { app: 2, sdk: 5 },
+    minCompatibleCode: "1.0.0",
+    preUpdateSnapshot: { file: "tb-preupdate-to-2.0.0.tar.gz", sha256: "a".repeat(64), createdAt: "2026-10-16T14:46:23.347Z", from: "1.0.0", to: "2.0.0" },
+    failure: { phase: "app_migrations", code: "migration_failed", file: "0003_bad.sql", at: "2026-10-16T14:46:23.400Z" },
+  };
+  assert.ok(old && failed.failure?.file);
+  const health: import("../src/sdk.ts").FailedHealth = {
+    status: "failed", sdk: "0.1.25", version: "2.0.0", manifestDigest: `sha256:${"b".repeat(64)}`, failure: failed.failure!, attention: failed.attention!,
+    schemaVersion: { app: 2, sdk: 5 }, codeSchema: { app: 3, sdk: 5 }, minCompatibleCode: "1.0.0", preUpdateSnapshot: null,
+  };
+  assert.equal(health.status, "failed");
+  const last: import("../src/routes.ts").InstanceLastUpdate = { outcome: "rolled_back", from: "1.0.0", to: "2.0.0", at: "2026-10-16T14:48:06.000Z", dataRestoredTo: "2026-10-16T14:45:37.000Z" };
+  const code: import("../src/routes.ts").ErrorCode = "update_rolled_back";
+  assert.ok(last.outcome === "rolled_back" && code);
+  assert.equal(SPEC_VERSION, "0.1.39");
+});
