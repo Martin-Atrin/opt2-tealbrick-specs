@@ -1,6 +1,6 @@
 # Tealbrick specs: architecture
 
-State: verified against the repo on 2026-10-16. Claims cite paths in this repo. Anything not verified is marked UNVERIFIED. For the whole system see the system `ARCHITECTURE.md` and `SYSTEM-OVERVIEW.md`.
+State: verified against the repo on 2026-10-17. Claims cite paths in this repo. Anything not verified is marked UNVERIFIED. For the whole system see `engineering/ARCHITECTURE.md` and `engineering/SYSTEM-OVERVIEW.md` in the private repo `Tealbrick/opt2-tealbrick-docs`.
 
 ## 1. What lives here
 
@@ -24,12 +24,15 @@ Contracts change only through the specs lead and a recorded decision. Additive w
 
 ## 4. Consumers
 
-portal-core and bridge (0.1.39); portal-gui and admin (0.1.38); connect (0.1.35); knowledge, evolution and conformance (0.1.31); bridge and cli (0.1.28); manifest (0.1.27); qa (0.1.7, very old); platform signer (0.1.20).
+Direct pins of `@opt2-tealbrick/spec` on 2026-10-17: 0.1.39 in portal-core, bridge (`packages/bridge`, `packages/bridge-server`), connect, knowledge and evolution; 0.1.38 in portal-gui and admin; 0.1.35 in miniapp-sdk; 0.1.31 in conformance; 0.1.28 in the cli repo (cli, relay, harnesses) and in the bridge repo's `packages/cli` and `packages/harness-claude`; 0.1.27 in manifest; 0.1.20 in platform; 0.1.7 in qa and 0.1.2 in tbd (both very old). Apps that do not pin it directly (fleet, inbox, kanban, rules, samples) get it through miniapp-sdk.
 
 ## 5. Known gaps
 
 - `docs/PORTAL-API.md` says "100 rows"; the table has 105. `docs/SDK-API.md` says 10 standard operations; the code has 11.
 - `sdk.ts` does not declare `onStop`, `jobs` or `schedule` (documented SPEC-GAP in SDK-API section 19; the SDK defines them locally).
 - `PORTAL_ROOT_KEYS.prod` is empty.
-- `docs/` and the coordination copies drifted. Spec 0.1.39 exports only TYPES for the upgrade-safety members (no runtime phase list, no validators, no JSON Schema); the bridge keeps local shape checks typed against them.
-- The licence wording question N12 (licence per major) was waiting on the owner (resolved in C-log: a lifetime licence covers the major bought).
+- `docs/` and the coordinator's local `coordination/specs` copies differ (BRIDGE, CONFORMANCE, CORE, PORTAL-API, RELEASES, REQUESTS and SDK-API, compared 2026-10-17).
+- `docs/PORTAL-API.md` (Agent Policy and C105 notes) lists three default held families (`destructive`, `money`, `first_contact`); `DEFAULT_HELD_FAMILIES` in `manifest.ts` has four (plus `identity`).
+- Spec 0.1.39 exports only types for the upgrade-safety members, plus the `BOOT_FAILURE_ATTENTION` constant (no runtime phase list, no validators, no JSON Schema). The bridge keeps local shape checks typed against them.
+- N12 (licence per major) is closed in the decision log (a lifetime licence covers the major bought), but `docs/FROZEN`, `docs/CORE.md` and `docs/PORTAL-API.md` still say it waits on the owner.
+- Licence: `package.json` declares MIT and no `LICENSE` file exists in the repo or the package, while decision C191 sets the Tealbrick SDK Licence (see README).
