@@ -159,6 +159,10 @@ export type ErrorCode =
   /** v0.1.37 (C184 §2.3, C203 Q2): 403, an operator suspended or banned this account; details.kind "suspend" | "ban".
    *  Not returned for account.me, licences.list and billing.portal (the customer can still read the notice and pay). */
   | "account_suspended"
+  /** v0.1.39 (C213 US-3, E3): Instance.lastError codes of a health-gated update — the old version is being put back / was put
+   *  back / could not be put back (operator alerted) / the data needs newer code and no snapshot restore was possible.
+   *  `release_not_deployable` details.reason adds "not_older" and "rollback_needs_restore" (instances.rollback). */
+  | "update_rolling_back" | "update_rolled_back" | "rollback_failed" | "rollback_needs_restore"
   | "internal";
 /** CORE §8: the one error envelope. */
 export interface ErrorEnvelope { error: { code: ErrorCode; message: string; requestId: string; details?: Record<string, unknown> } }
@@ -763,6 +767,21 @@ export interface Instance {
   createdAt: IsoTime;
   /** v0.1.13 (C82): consents the release asks for (wildcard companion → `holds_pending_all`) and their state */
   consents?: InstanceConsent[];
+  /** v0.1.39 (C213 US-3, E3): the outcome of the last version-changing update. GUI card text for `rolled_back`:
+   *  "Update failed — rolled back to <from>, your data is restored to <dataRestoredTo> UTC." (or "your data is kept"). */
+  lastUpdate?: InstanceLastUpdate;
+  /** v0.1.39 (US-3): a version-changing update in progress; `rollingBack` = the GUI's "Undoing" step */
+  updating?: { from: string; to: string; rollingBack: boolean };
+}
+/** v0.1.39 (US-3) */
+export interface InstanceLastUpdate {
+  outcome: "updated" | "rolled_back" | "rollback_failed";
+  from: string;
+  to: string;
+  at: IsoTime;
+  reason?: { code: string; message: string };
+  /** rolled_back with a snapshot restore: the data is as it was when the update started; null = data kept */
+  dataRestoredTo?: IsoTime | null;
 }
 /** v0.1.13 (C82). GUI text for `holds_pending_all`: "This app can see the pending approvals of all apps". */
 export type ConsentKind = "holds_pending_all";

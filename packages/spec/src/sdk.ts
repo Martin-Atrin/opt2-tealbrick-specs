@@ -5,6 +5,7 @@
 import type {
   AppAttention,
   AppStatus,
+  BootFailure,
   BridgeOp,
   BridgeOpBodies,
   CallEnvelope,
@@ -17,6 +18,8 @@ import type {
   OnBehalfOfContext,
   OpCallBody,
   OpResult,
+  PreUpdateSnapshotRef,
+  SchemaVersion,
   ScopeSummaryResult,
 } from "./bridge.ts";
 import type {
@@ -729,6 +732,26 @@ export interface Health {
   attention?: AttentionCode;
   /** v0.1.31 (SDK-03, miniapp-sdk 0.1.22): scheduled-backup state; omitted by SDKs before 0.1.22 */
   backup?: BackupHealth;
+  /** v0.1.39 (C213 US-1, miniapp-sdk 0.1.25): see AppStatus (bridge.ts); omitted by older SDKs */
+  schemaVersion?: SchemaVersion | null;
+  minCompatibleCode?: string | null;
+  /** v0.1.39: the oldest SDK that can run this data (the SDK that applied its newest SDK migration); null = unknown */
+  minCompatibleSdk?: string | null;
+  preUpdateSnapshot?: PreUpdateSnapshotRef | null;
+}
+/** v0.1.39 (US-1): failed mode (status "failed") answers 200 with this body; every other route answers 503 `app_failed`. */
+export interface FailedHealth {
+  status: "failed";
+  sdk: string;
+  version: string;
+  manifestDigest: Sha256Digest;
+  failure: BootFailure;
+  attention: { code: string; reason: string };
+  schemaVersion: SchemaVersion | null;
+  /** what this code can run: app = number of migration files, sdk = newest SDK migration */
+  codeSchema: SchemaVersion;
+  minCompatibleCode: string | null;
+  preUpdateSnapshot: PreUpdateSnapshotRef | null;
 }
 /** v0.1.31 (SDK-03, L3): a failed, overdue or unparsable scheduled backup is never silent. The same condition rides
  *  `AppStatus.attention` (codes `backup_failed`, `backup_overdue`, `backup_schedule_invalid`, `backup_schedule_never`). */
@@ -772,6 +795,11 @@ export interface BackupMeta {
   sdk: string;
   createdAt: string;
   parts: { name: string; file: string; sha256: string; bytes: number }[];
+  /** v0.1.39 (US-4): `"preupdate"` for the pre-update snapshot (then `version` = the data's version, "0.0.0" when unknown) */
+  kind?: "preupdate";
+  fromVersion?: string | null;
+  toVersion?: string;
+  schema?: SchemaVersion;
 }
 export interface ExportMeta {
   format: "tealbrick.export/1";

@@ -287,6 +287,11 @@ export interface StatusReport {
     sliceRevision?: number;
     /** v0.1.28 (F89): AppStatus.attention as the app last reported it (omitted when absent); Core shows it on the app card */
     attention?: AppAttention;
+    /** v0.1.39 (C213 US-2): AppStatus.schemaVersion / minCompatibleCode / failure copied unchanged (omitted when absent, L24);
+     *  Core's health-gated update and rollback read them (UPGRADE-SAFETY M4/M5) */
+    schemaVersion?: SchemaVersion;
+    minCompatibleCode?: SemVer | null;
+    failure?: BootFailure;
   }[];
   /** presence booleans only — never values */
   keys: { name: string; ins: InstanceId; set: boolean }[];
@@ -491,7 +496,42 @@ export interface AppStatus {
   pendingHolds: number;
   /** v0.1.28 (F89): app-reported condition the owner should see (from `defineApp({attention})`); present → readiness `degraded` */
   attention?: AppAttention;
+  /** v0.1.39 (C213 US-1, miniapp-sdk 0.1.25): the schema the app's data is at (highest applied migration per scope) */
+  schemaVersion?: SchemaVersion;
+  /** v0.1.39 (US-1): the oldest app version that can run this data (the version that applied its newest migration); null = unknown */
+  minCompatibleCode?: SemVer | null;
+  /** v0.1.39 (US-1): the newest pre-update snapshot of this data (SDK-API §7.3a) */
+  preUpdateSnapshot?: PreUpdateSnapshotRef | null;
+  /** v0.1.39 (US-1): present only in failed mode (Health.status "failed"); readiness `degraded` + attention carry it too */
+  failure?: BootFailure;
 }
+/** v0.1.39 (US-1): highest applied migration per scope (0 = none). */
+export interface SchemaVersion {
+  app: number;
+  sdk: number;
+}
+/** v0.1.39 (US-4): the pre-update snapshot `TB_BACKUP_DIR/tb-preupdate-to-<version>.tar.gz` (SDK-API §7.3a). */
+export interface PreUpdateSnapshotRef {
+  file: string;
+  sha256: string;
+  createdAt: IsoTime;
+  /** the app version that wrote the data; null for data from before miniapp-sdk 0.1.25 */
+  from: SemVer | null;
+  to: SemVer;
+}
+/** v0.1.39 (US-1): the boot phase that failed and why (never SQL, data or a secret). */
+export interface BootFailure {
+  phase: "restore" | "open" | "schema" | "lock" | "snapshot" | "sdk_migrations" | "app_migrations";
+  /** SDK error code, e.g. migration_invalid, migration_failed, app_schema_newer, sdk_schema_newer, restore_failed, migration_locked */
+  code: string;
+  /** restore: product_mismatch | version_newer | schema_newer | snapshot_missing | archive_missing | meta_invalid | db_invalid | name_invalid */
+  reason?: string;
+  /** the app migration file that failed */
+  file?: string;
+  at: IsoTime;
+}
+/** v0.1.39 (US-1): attention codes the SDK itself raises in failed mode (next to the backup_* codes of v0.1.31). */
+export const BOOT_FAILURE_ATTENTION = ["migration_failed", "restore_failed", "schema_newer", "migration_locked", "preupdate_snapshot_failed", "preupdate_snapshot_no_space"] as const;
 /** v0.1.28 (F89): `code` matches `^[a-z][a-z0-9_]{0,39}$`; `reason` is plain text ≤ 200 chars for the owner — never a
  *  secret, a key name's value, raw upstream text or another app's data. */
 export interface AppAttention {
