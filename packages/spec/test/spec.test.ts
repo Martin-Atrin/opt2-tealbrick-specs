@@ -187,7 +187,7 @@ test("v0.1.37 (C184 §2.3/§6, Admin S2): suspend/ban/lift + health rows; accoun
 test("v0.1.38 (C184 §4/§5, Admin S3): GDPR + CRA rows; personal-data and destructive ops are owner + step-up", async () => {
   const admin = await import("../src/admin.ts");
   const byId = new Map(admin.ADMIN_ROUTES.map((r) => [r.opId, r] as const));
-  for (const op of ["gdpr.export_build", "gdpr.export_download", "gdpr.erasure_execute"]) {
+  for (const op of ["gdpr.export_build", "gdpr.export_download", "gdpr.erasure_execute"] as const) {
     assert.equal(byId.get(op)?.minRole, "owner", op);
     assert.equal(byId.get(op)?.stepUp, true, op);
   }
