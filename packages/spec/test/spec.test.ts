@@ -145,3 +145,28 @@ test("v0.1.35 (SDK-HV-1): DynamicHandlers.holdView is optional and async; Dynami
   assert.deepEqual(v, { view: "To: a@b.c" });
   assert.equal(v?.summary, undefined);
 });
+
+test("v0.1.36 (C193/C203/C204): ADMIN_ROUTES is separate from ROUTES; admin paths, step-up and idempotency rules", async () => {
+  const admin = await import("../src/admin.ts");
+  const ids = new Set<string>();
+  for (const r of admin.ADMIN_ROUTES) {
+    assert.ok(!ids.has(r.opId), r.opId);
+    ids.add(r.opId);
+    assert.equal(r.exposure, "admin");
+    assert.match(r.path, /^\/admin\/v1\//);
+    if (r.effect === "destructive") assert.equal(r.stepUp, true, r.opId);
+    if (r.method !== "GET") assert.equal(r.idempotent, true, r.opId);
+  }
+  // ROUTES has no admin row and no /admin path
+  for (const r of ROUTES as readonly { exposure: string; path: string }[]) {
+    assert.notEqual(r.exposure, "admin");
+    assert.ok(!r.path.startsWith("/admin"), r.path);
+  }
+  assert.equal(admin.roleCovers("owner", "support"), true);
+  assert.equal(admin.roleCovers("support", "owner"), false);
+  assert.equal(admin.roleCovers("readonly", "readonly"), true);
+  const input = admin.ADMIN_GATEWAY_SIGNING_INPUT({ method: "POST", pathAndQuery: "/admin/v1/licences/comps", bodySha256: "e3b0", rid: "r".repeat(16), ts: 1 });
+  assert.equal(input, `tb-admin-gw-v1\nPOST\n/admin/v1/licences/comps\ne3b0\n${"r".repeat(16)}\n1`);
+  assert.equal(admin.ADMIN_STEP_UP_MAX_AGE_MINUTES, 5);
+  assert.equal(SPEC_VERSION, JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
+});

@@ -45,8 +45,10 @@ export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
  *  assertion; device=K2 device_code in body; public=no credential; stripe-webhook=Stripe signature. */
 export type AuthClass = "browser" | "owner-cli" | "bridge" | "device" | "public" | "stripe-webhook";
 /** gateway = forwarded by the generated GUI gateway at https://<portal>/api/v1/…; internal = Core
- *  private network only (the gateway never forwards it). No third value: no row → no route. */
-export type Exposure = "gateway" | "internal";
+ *  private network only (the gateway never forwards it). v0.1.36 (C193): admin = only in ADMIN_ROUTES
+ *  (`@opt2-tealbrick/spec/admin`), served only on Core's admin listener; never a ROUTES row (Core's main listener refuses
+ *  any exposure other than gateway/internal). */
+export type Exposure = "gateway" | "internal" | "admin";
 export type Transport = "json" | "json_slow" | "sse" | "longpoll" | "raw" | "binary";
 export type RateClass =
   | "read" | "write" | "sensitive" | "public_strict" | "device_poll"
@@ -149,6 +151,11 @@ export type ErrorCode =
   | "terms_not_accepted"
   /** v0.1.32 (C196 ENG-6): 403, the owner has no second sign-in factor while Core requires one (TB_REQUIRE_MFA) */
   | "mfa_required"
+  /** v0.1.36 (C193/C204, admin listener only): 403, the Clerk user is not in TB_ADMIN_OPERATORS (or its primary email is not
+   *  verified), or its role is below the op's minRole */
+  | "operator_forbidden"
+  /** v0.1.36 (C203, admin listener only): 403, the op needs a Clerk verification younger than ADMIN_STEP_UP_MAX_AGE_MINUTES */
+  | "step_up_required"
   | "internal";
 /** CORE §8: the one error envelope. */
 export interface ErrorEnvelope { error: { code: ErrorCode; message: string; requestId: string; details?: Record<string, unknown> } }
@@ -817,15 +824,22 @@ export interface Licence {
   id: LicenceId;
   product: ProductId;
   major: number;
-  status: "active" | "refunded" | "disputed" | "review";
-  offerId: OfferId;
-  orderId: OrderId;
+  /** v0.1.36 (C184 comps): `revoked` / `expired` occur only for source "comp" (the customer list leaves those out) */
+  status: "active" | "refunded" | "disputed" | "review" | "revoked" | "expired";
+  /** v0.1.36: null for a complimentary licence (no offer, no order, no invoice) */
+  offerId: OfferId | null;
+  orderId: OrderId | null;
   fromBundle: boolean;
   assignment: { ws: WorkspaceId; workspaceName: string; assignedAt: IsoTime } | null;
   livemode: boolean;
   createdAt: IsoTime;
   /** v0.1.34 (C200, Terms 9A.3): not-before time; the licence entitles only from then (isEntitled honours it). */
   activeFrom?: IsoTime | null;
+  /** v0.1.36 (C184/C203): purchase (Stripe order) or comp (complimentary, issued by an operator; UI word "Free licence").
+   *  Absent = purchase. */
+  source?: "purchase" | "comp";
+  /** v0.1.36: a comp's end; null/absent = no end (purchase, or a lifetime comp for this major). isEntitled honours it. */
+  expiresAt?: IsoTime | null;
 }
 export type LicenceListInput = PageQuery & { product?: ProductId; assigned?: boolean };
 export type LicenceList = Page<Licence>;
