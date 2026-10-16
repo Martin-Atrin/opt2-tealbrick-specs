@@ -4,10 +4,10 @@ The frozen interface contract of Tealbrick: markdown specs (`docs/`) and the dat
 
 - Repository: `Tealbrick/opt2-tealbrick-specs` (GitHub organisation `Tealbrick`)
 - Visibility target: PRIVATE. The repo is PUBLIC for now (the flip is held for the org Actions billing). Consumers install from the dist host, so the flip does not break anonymous installs.
-- Licence: declared MIT in `packages/spec/package.json` today. The target is the Tealbrick SDK licence (text pending). Versions already released as MIT stay MIT.
+- Licence: `@opt2-tealbrick/spec` is one of the SDK Packages under the Tealbrick SDK Licence (Part B of the Tealbrick Software Licence, decision C191, published at https://tealbrick.com/software-licence, to ship as `LICENSE` inside the package tarball). This repo does not apply it yet: `packages/spec/package.json` declares `"license": "MIT"` and there is no `LICENSE` file in the repo or in the package. Versions published with an MIT declaration stay available under MIT (licence section 1.3).
 - Status: spec 0.1.39. CI template ci-v9.9. Contracts were frozen at v0.1 on 2026-10-11 (`docs/FROZEN`). Changes are additive within a minor.
 
-Do not put secrets, tokens, keys, customer data or personal data in this repository, its issues or its pull requests. This repository is public for now and must stay clean either way: no API keys, tokens, passwords, private keys, `.env` files, connection strings, personal names, private agent configurations or customer data. Every CI run starts with a secret scan (gitleaks, a step in `.woodpecker/ci.yaml`). GitHub secret scanning with push protection is enabled. An optional local guard is `pre-commit install`. If a secret is committed, rotate it first, then remove it from history.
+Do not put secrets, tokens, keys, customer data or personal data in this repository, its issues or its pull requests. This repository is public for now and must stay clean either way: no API keys, tokens, passwords, private keys, `.env` files, connection strings, personal names, private agent configurations or customer data. Every CI run starts with a secret scan (gitleaks, a step in `.woodpecker/ci.yaml`). GitHub secret scanning and push protection are NOT enabled on this repo (free organisation plan), so the CI step is the guard. An optional local guard is `pre-commit install`. If a secret is committed, rotate it first, then remove it from history.
 
 ## What this repo is and is not
 
