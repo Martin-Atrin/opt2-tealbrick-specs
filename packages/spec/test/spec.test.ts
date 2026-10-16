@@ -183,3 +183,19 @@ test("v0.1.37 (C184 §2.3/§6, Admin S2): suspend/ban/lift + health rows; accoun
   const h: import("../src/routes.ts").Health = { ok: true, version: "x", db: "ok" };
   assert.equal(h.commerce, undefined);
 });
+
+test("v0.1.38 (C184 §4/§5, Admin S3): GDPR + CRA rows; personal-data and destructive ops are owner + step-up", async () => {
+  const admin = await import("../src/admin.ts");
+  const byId = new Map(admin.ADMIN_ROUTES.map((r) => [r.opId, r] as const));
+  for (const op of ["gdpr.export_build", "gdpr.export_download", "gdpr.erasure_execute"]) {
+    assert.equal(byId.get(op)?.minRole, "owner", op);
+    assert.equal(byId.get(op)?.stepUp, true, op);
+  }
+  assert.equal(byId.get("gdpr.erasure_execute")?.effect, "destructive");
+  assert.equal(byId.get("cra.triage")?.minRole, "owner");
+  assert.equal(byId.get("cra.submission_record")?.minRole, "owner");
+  assert.equal(admin.GDPR_DUE_DAYS, 30);
+  assert.equal(admin.CRA_EARLY_WARNING_HOURS, 24);
+  assert.equal(admin.CRA_NOTIFICATION_HOURS, 72);
+  assert.ok(admin.ADMIN_ROUTES.length >= 36);
+});

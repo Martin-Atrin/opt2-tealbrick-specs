@@ -1,6 +1,8 @@
 // Tealbrick Admin (operator plane, C184/C193/C203/C204): the ADMIN route table and its types.
 // v0.1.36 (S1): admin.me, customers.search/get, licences comp issue/list/revoke, operator audit list/verify.
 // v0.1.37 (S2): customers.suspend/unsuspend/ban/unban (+ CustomerDetail.actions), admin.health, admin.maintenance_runs.
+// v0.1.38 (S3): GDPR request queue (gdpr.*) and CRA case queue (cra.*). Core keeps the records and the clocks; nothing is
+// ever sent or filed automatically (replies and JISKB submissions are done by a person and only RECORDED here).
 //
 // The admin table is SEPARATE from ROUTES: it is not in ROUTES, not in /internal/routes and not in ROUTES_DIGEST.
 // Core serves it only on its admin listener (TB_ADMIN_PORT, default 8091), never on the main listener, and the Portal GUI
@@ -331,6 +333,156 @@ export type OperatorAuditListInput = PageQuery & { operator?: string };
 export type OperatorAuditList = Page<OperatorAuditEntry>;
 export interface OperatorAuditVerify { ok: boolean; rows: number; brokenAtId: number | null; headHash: string | null }
 
+// ───────────────────────────── S3: GDPR queue (C184 §4; C203: records kept 3 years after close) ─────────────────────────────
+export type GdprRequestId = Id<"gdp">;
+export type GdprExportId = Id<"gex">;
+export type GdprKind = "access" | "portability" | "erasure" | "rectification" | "restriction" | "objection";
+export const GDPR_KINDS = ["access", "portability", "erasure", "rectification", "restriction", "objection"] as const satisfies readonly GdprKind[];
+export type GdprState = "open" | "waiting_requester" | "in_progress" | "done" | "refused" | "withdrawn";
+export type GdprOutcome = "done" | "partly_done" | "refused" | "not_our_data" | "no_data";
+export const GDPR_OUTCOMES = ["done", "partly_done", "refused", "not_our_data", "no_data"] as const satisfies readonly GdprOutcome[];
+/** Reply templates the GUI renders (A access/export, B erasure done, C rectification, D restriction, E objection,
+ *  F apps + data in the customer's own hosting, G a person in a customer's data: not ours, H identity not confirmed). */
+export type GdprReplyTemplate = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H";
+export const GDPR_REPLY_TEMPLATES = ["A", "B", "C", "D", "E", "F", "G", "H"] as const satisfies readonly GdprReplyTemplate[];
+/** Art. 12(3): one month (we use the earlier of 30 days and one calendar month); extension by up to two more months. */
+export const GDPR_DUE_DAYS = 30 as const;
+export const GDPR_MAX_EXTENSION_MONTHS = 2 as const;
+export const GDPR_EXPORT_TTL_DAYS = 7 as const;
+
+export interface GdprRequest {
+  id: GdprRequestId;
+  kind: GdprKind;
+  channel: "email" | "portal_form" | "other";
+  receivedAt: IsoTime;
+  /** masked for readonly */
+  requesterEmail: string;
+  accountId: AccountId | null;
+  /** short operator summary, no secrets (≤ 500) */
+  summary: string | null;
+  identity: "unverified" | "verified" | "failed";
+  identityMethod: "portal_session" | "account_email_reply" | "other" | null;
+  verifiedAt: IsoTime | null;
+  dueAt: IsoTime;
+  extendedUntil: IsoTime | null;
+  extensionReason: string | null;
+  extensionNotifiedAt: IsoTime | null;
+  /** extendedUntil ?? dueAt */
+  effectiveDueAt: IsoTime;
+  /** whole days to effectiveDueAt (negative = late), from Core's clock */
+  daysLeft: number;
+  late: boolean;
+  state: GdprState;
+  outcome: GdprOutcome | null;
+  replyTemplate: GdprReplyTemplate | null;
+  closedAt: IsoTime | null;
+  createdBy: string;
+  createdAt: IsoTime;
+}
+export interface GdprEvent { id: number; at: IsoTime; kind: string; operatorId: string; detail: Record<string, string | number | boolean | null> }
+export interface GdprExport { id: GdprExportId; requestId: GdprRequestId; accountId: AccountId; sha256: string; bytes: number; createdAt: IsoTime; expiresAt: IsoTime; downloadedAt: IsoTime | null; deletedAt: IsoTime | null }
+export interface GdprDetail { request: GdprRequest; events: GdprEvent[]; exports: GdprExport[]; account: CustomerSummary | null }
+export type GdprListInput = PageQuery & { state?: "open" | "all" };
+export type GdprList = Page<GdprRequest>;
+export interface GdprRef { gdp: GdprRequestId }
+export interface GdprCreateInput { kind: GdprKind; channel: "email" | "portal_form" | "other"; receivedAt: IsoTime; requesterEmail: string; accountId?: AccountId; summary?: string }
+export interface GdprUpdateInput { gdp: GdprRequestId; state?: "open" | "waiting_requester" | "in_progress"; summary?: string; note?: string }
+export interface GdprIdentityInput { gdp: GdprRequestId; identity: "verified" | "failed"; method: "portal_session" | "account_email_reply" | "other"; accountId?: AccountId; note?: string }
+export interface GdprExtendInput { gdp: GdprRequestId; extendedUntil: IsoTime; reason: string; notifiedAt: IsoTime }
+export interface GdprCloseInput { gdp: GdprRequestId; outcome: GdprOutcome; replyTemplate: GdprReplyTemplate; note?: string }
+export interface GdprErasurePreview {
+  accountId: AccountId;
+  /** rows the erasure deletes or anonymises, per table (a dry run of the same code, rolled back) */
+  rows: Record<string, number>;
+  /** what stays and why (plain sentences) */
+  keeps: string[];
+  clerkUser: boolean;
+}
+export interface GdprErasureInput { gdp: GdprRequestId; confirmEmail: string; deleteClerkUser: boolean }
+export interface GdprErasureResult { accountId: AccountId; rows: Record<string, number>; clerk: "deleted" | "skipped" | "not_found" }
+/** one-download JSON bundle (format tealbrick.portal-export/1) */
+export interface GdprBundle { [k: string]: unknown }
+
+// ───────────────────────────── S3: CRA cases (C184 §5; C203: records kept 10 years) ─────────────────────────────
+export type CraCaseId = Id<"cra">;
+export type CraKind = "vulnerability" | "exploited_vulnerability" | "severe_incident" | "not_reportable" | "undecided";
+export const CRA_KINDS = ["vulnerability", "exploited_vulnerability", "severe_incident", "not_reportable", "undecided"] as const satisfies readonly CraKind[];
+export type CraSource = "security_mail" | "github_pvr" | "cvd_form" | "internal" | "customer";
+export const CRA_SOURCES = ["security_mail", "github_pvr", "cvd_form", "internal", "customer"] as const satisfies readonly CraSource[];
+export type CraStage = "early_warning" | "notification" | "final" | "interim" | "fallback_email";
+export const CRA_STAGES = ["early_warning", "notification", "final", "interim", "fallback_email"] as const satisfies readonly CraStage[];
+export type CraState = "triage" | "reporting" | "fixing" | "monitoring" | "closed";
+/** Article 14 clocks from awareness: early warning 24 h, notification 72 h; final = 14 days after the fix (exploited
+ *  vulnerability) or 1 month after the notification (severe incident). "undecided" counts as reportable. */
+export const CRA_EARLY_WARNING_HOURS = 24 as const;
+export const CRA_NOTIFICATION_HOURS = 72 as const;
+export const CRA_FINAL_AFTER_FIX_DAYS = 14 as const;
+
+export interface CraClock {
+  stage: "early_warning" | "notification" | "final";
+  /** null = not computable yet (final before a fix / before the notification) */
+  dueAt: IsoTime | null;
+  submittedAt: IsoTime | null;
+  late: boolean;
+  /** whole hours to dueAt (negative = late); null when there is no due time or it was submitted */
+  hoursLeft: number | null;
+}
+export interface CraCase {
+  id: CraCaseId;
+  source: CraSource;
+  receivedAt: IsoTime;
+  /** clock start; moves earlier freely, later only by an owner with a reason and a step-up */
+  awarenessAt: IsoTime;
+  /** no secrets, no customer personal data (≤ 1000) */
+  summary: string;
+  products: { product: string; versions: string }[];
+  kind: CraKind;
+  reportable: boolean;
+  decidedAt: IsoTime | null;
+  decidedBy: string | null;
+  notReportableReason: string | null;
+  severity: "low" | "medium" | "high" | "critical" | null;
+  cvssVector: string | null;
+  maliciousAct: "confirmed" | "suspected" | "unknown";
+  personalData: "yes" | "no" | "unknown";
+  fixVersion: string | null;
+  fixAvailableAt: IsoTime | null;
+  userNoticeSentAt: IsoTime | null;
+  userNoticeCount: number | null;
+  advisoryUrl: string | null;
+  cveId: string | null;
+  ghsaId: string | null;
+  state: CraState;
+  closedAt: IsoTime | null;
+  createdBy: string;
+  createdAt: IsoTime;
+  clocks: CraClock[];
+}
+export interface CraSubmission { id: number; caseId: CraCaseId; stage: CraStage; submittedAt: IsoTime; jiskbReference: string | null; evidenceLocation: string; submittedBy: string; late: boolean }
+export interface CraEvent { id: number; at: IsoTime; kind: string; operatorId: string; text: string | null }
+export interface CraDetail { case: CraCase; submissions: CraSubmission[]; events: CraEvent[] }
+export type CraListInput = PageQuery & { state?: "open" | "all" };
+export type CraList = Page<CraCase>;
+export interface CraRef { cra: CraCaseId }
+export interface CraCreateInput { source: CraSource; receivedAt: IsoTime; awarenessAt?: IsoTime; summary: string; products?: { product: string; versions: string }[]; ghsaId?: string }
+export interface CraTriageInput {
+  cra: CraCaseId;
+  kind: CraKind;
+  severity?: "low" | "medium" | "high" | "critical" | null;
+  cvssVector?: string | null;
+  products?: { product: string; versions: string }[];
+  maliciousAct?: "confirmed" | "suspected" | "unknown";
+  personalData?: "yes" | "no" | "unknown";
+  /** required for kind not_reportable or vulnerability */
+  notReportableReason?: string;
+}
+export interface CraAwarenessInput { cra: CraCaseId; awarenessAt: IsoTime; reason?: string }
+export interface CraSubmissionInput { cra: CraCaseId; stage: CraStage; submittedAt: IsoTime; jiskbReference?: string; evidenceLocation: string }
+export interface CraTimelineInput { cra: CraCaseId; text: string }
+export interface CraFixInput { cra: CraCaseId; fixVersion: string; fixAvailableAt: IsoTime }
+export interface CraAdvisoryInput { cra: CraCaseId; advisoryUrl?: string; cveId?: string; ghsaId?: string; userNoticeSentAt?: IsoTime; userNoticeCount?: number }
+export interface CraCloseInput { cra: CraCaseId; note?: string }
+
 export interface AdminEmpty { [k: string]: never }
 
 export interface AdminSchemaMap {
@@ -356,6 +508,13 @@ export interface AdminSchemaMap {
   AdminHealth: AdminHealth;
   MaintenanceRunsInput: MaintenanceRunsInput;
   MaintenanceRunList: MaintenanceRunList;
+  GdprListInput: GdprListInput; GdprList: GdprList; GdprRef: GdprRef; GdprDetail: GdprDetail; GdprCreateInput: GdprCreateInput;
+  GdprUpdateInput: GdprUpdateInput; GdprIdentityInput: GdprIdentityInput; GdprExtendInput: GdprExtendInput; GdprCloseInput: GdprCloseInput;
+  GdprErasurePreview: GdprErasurePreview; GdprErasureInput: GdprErasureInput; GdprErasureResult: GdprErasureResult; GdprExport: GdprExport;
+  GdprBundle: GdprBundle;
+  CraListInput: CraListInput; CraList: CraList; CraRef: CraRef; CraDetail: CraDetail; CraCreateInput: CraCreateInput; CraTriageInput: CraTriageInput;
+  CraAwarenessInput: CraAwarenessInput; CraSubmissionInput: CraSubmissionInput; CraTimelineInput: CraTimelineInput; CraFixInput: CraFixInput;
+  CraAdvisoryInput: CraAdvisoryInput; CraCloseInput: CraCloseInput;
 }
 export type AdminSchemaName = keyof AdminSchemaMap;
 
@@ -381,6 +540,30 @@ export const ADMIN_ROUTES = [
   { opId: "customers.unban", method: "POST", path: "/admin/v1/customers/{acc}/unban", exposure: "admin", auth: OP, minRole: "owner", effect: "write", stepUp: true, rate: "admin_write", query: NOQ, input: "LiftInput", output: "AccountStateChange", idempotent: true },
   { opId: "admin.health", method: "GET", path: "/admin/v1/health", exposure: "admin", auth: OP, minRole: "readonly", effect: "read", stepUp: false, rate: "admin_read", query: NOQ, input: "AdminEmpty", output: "AdminHealth", idempotent: false },
   { opId: "admin.maintenance_runs", method: "GET", path: "/admin/v1/maintenance-runs", exposure: "admin", auth: OP, minRole: "readonly", effect: "read", stepUp: false, rate: "admin_read", query: ["job", ...PAGE], input: "MaintenanceRunsInput", output: "MaintenanceRunList", idempotent: false },
+  // v0.1.38 (S3) GDPR
+  { opId: "gdpr.list", method: "GET", path: "/admin/v1/gdpr", exposure: "admin", auth: OP, minRole: "support", effect: "read", stepUp: false, rate: "admin_read", query: ["state", ...PAGE], input: "GdprListInput", output: "GdprList", idempotent: false },
+  { opId: "gdpr.get", method: "GET", path: "/admin/v1/gdpr/{gdp}", exposure: "admin", auth: OP, minRole: "support", effect: "read", stepUp: false, rate: "admin_read", query: NOQ, input: "GdprRef", output: "GdprDetail", idempotent: false },
+  { opId: "gdpr.create", method: "POST", path: "/admin/v1/gdpr", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "GdprCreateInput", output: "GdprDetail", idempotent: true },
+  { opId: "gdpr.update", method: "POST", path: "/admin/v1/gdpr/{gdp}/update", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "GdprUpdateInput", output: "GdprDetail", idempotent: true },
+  { opId: "gdpr.identity_record", method: "POST", path: "/admin/v1/gdpr/{gdp}/identity", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "GdprIdentityInput", output: "GdprDetail", idempotent: true },
+  { opId: "gdpr.extend", method: "POST", path: "/admin/v1/gdpr/{gdp}/extend", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "GdprExtendInput", output: "GdprDetail", idempotent: true },
+  { opId: "gdpr.export_build", method: "POST", path: "/admin/v1/gdpr/{gdp}/export", exposure: "admin", auth: OP, minRole: "owner", effect: "write", stepUp: true, rate: "admin_export", query: NOQ, input: "GdprRef", output: "GdprExport", idempotent: true },
+  { opId: "gdpr.export_download", method: "POST", path: "/admin/v1/gdpr/{gdp}/export/download", exposure: "admin", auth: OP, minRole: "owner", effect: "read", stepUp: true, rate: "admin_export", query: NOQ, input: "GdprRef", output: "GdprBundle", idempotent: true },
+  { opId: "gdpr.erasure_preview", method: "GET", path: "/admin/v1/gdpr/{gdp}/erasure", exposure: "admin", auth: OP, minRole: "support", effect: "read", stepUp: false, rate: "admin_read", query: NOQ, input: "GdprRef", output: "GdprErasurePreview", idempotent: false },
+  { opId: "gdpr.erasure_execute", method: "POST", path: "/admin/v1/gdpr/{gdp}/erasure", exposure: "admin", auth: OP, minRole: "owner", effect: "destructive", stepUp: true, rate: "admin_destructive", query: NOQ, input: "GdprErasureInput", output: "GdprErasureResult", idempotent: true },
+  { opId: "gdpr.close", method: "POST", path: "/admin/v1/gdpr/{gdp}/close", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "GdprCloseInput", output: "GdprDetail", idempotent: true },
+  // v0.1.38 (S3) CRA
+  { opId: "cra.list", method: "GET", path: "/admin/v1/cra", exposure: "admin", auth: OP, minRole: "support", effect: "read", stepUp: false, rate: "admin_read", query: ["state", ...PAGE], input: "CraListInput", output: "CraList", idempotent: false },
+  { opId: "cra.get", method: "GET", path: "/admin/v1/cra/{cra}", exposure: "admin", auth: OP, minRole: "support", effect: "read", stepUp: false, rate: "admin_read", query: NOQ, input: "CraRef", output: "CraDetail", idempotent: false },
+  { opId: "cra.create", method: "POST", path: "/admin/v1/cra", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "CraCreateInput", output: "CraDetail", idempotent: true },
+  { opId: "cra.triage", method: "POST", path: "/admin/v1/cra/{cra}/triage", exposure: "admin", auth: OP, minRole: "owner", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "CraTriageInput", output: "CraDetail", idempotent: true },
+  /** step-up only when the new awareness time is LATER than the current one (Core enforces; T9) */
+  { opId: "cra.awareness_set", method: "POST", path: "/admin/v1/cra/{cra}/awareness", exposure: "admin", auth: OP, minRole: "owner", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "CraAwarenessInput", output: "CraDetail", idempotent: true },
+  { opId: "cra.submission_record", method: "POST", path: "/admin/v1/cra/{cra}/submissions", exposure: "admin", auth: OP, minRole: "owner", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "CraSubmissionInput", output: "CraDetail", idempotent: true },
+  { opId: "cra.timeline_add", method: "POST", path: "/admin/v1/cra/{cra}/timeline", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "CraTimelineInput", output: "CraDetail", idempotent: true },
+  { opId: "cra.fix_record", method: "POST", path: "/admin/v1/cra/{cra}/fix", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "CraFixInput", output: "CraDetail", idempotent: true },
+  { opId: "cra.advisory_record", method: "POST", path: "/admin/v1/cra/{cra}/advisory", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "CraAdvisoryInput", output: "CraDetail", idempotent: true },
+  { opId: "cra.close", method: "POST", path: "/admin/v1/cra/{cra}/close", exposure: "admin", auth: OP, minRole: "owner", effect: "write", stepUp: false, rate: "admin_write", query: NOQ, input: "CraCloseInput", output: "CraDetail", idempotent: true },
 ] as const satisfies readonly AdminRouteOp[];
 
 type AdminRow = (typeof ADMIN_ROUTES)[number];
