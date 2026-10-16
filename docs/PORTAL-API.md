@@ -476,3 +476,10 @@ Resolved since v0 and removed: id prefixes (CORE §1), connection method `pairin
 - Step-up (C203): rows with `stepUp: true` need a Clerk verification younger than 5 minutes (session claim `fva`); else 403 `step_up_required`. Not on the list / role too low: 403 `operator_forbidden`.
 - `Licence` (additive): `source?: "purchase" | "comp"`, `expiresAt?`, `offerId`/`orderId` may be null (a comp has no offer, order or invoice), `status` gains `revoked` / `expired` (comps only; the customer `licences.list` leaves revoked/expired comps out). A comp is issued in the Core's Stripe mode (CORE-A-03) and entitles through the same `isEntitled`, which honours `expiresAt`.
 - Every admin op writes one append-only, hash-chained `operator_audit` row (ids only, no bodies), kept 3 years (own retention job, not the 365-day customer audit prune).
+
+## v0.1.37 additions (C184 §2.3, §6; C203 Q2: Admin S2)
+
+- Admin ops `customers.suspend` / `customers.unsuspend` (support, step-up), `customers.ban` (owner, destructive, step-up, typed account email) / `customers.unban` (owner, step-up), `admin.health`, `admin.maintenance_runs`; `CustomerDetail.actions`.
+- Suspension: every customer op of that account answers 403 `account_suspended` (`details.kind` suspend | ban) except `account.me` (carries `AccountMe.restriction` with the customer text), `licences.list`, `billing.portal` and `owner_sessions.logout`. `isEntitled` is false for every licence of a suspended or banned account, and Core re-mints every workspace config at once, so the bridge drops app grants on its next pull (within ~60 s online). The bridge keeps pulling (its config carries no app grants). Timed suspensions end on their own.
+- Ban = suspension + Clerk ban (ends the user's Clerk sessions, blocks sign-in) + owner CLI sessions revoked + device requests denied. If Clerk refuses, nothing changes. Neither suspension nor ban deletes data. Lifting re-mints the configs; revoked sessions stay revoked.
+- `Health.commerce` is typed (ADM-8).

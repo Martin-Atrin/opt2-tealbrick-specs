@@ -170,3 +170,16 @@ test("v0.1.36 (C193/C203/C204): ADMIN_ROUTES is separate from ROUTES; admin path
   assert.equal(admin.ADMIN_STEP_UP_MAX_AGE_MINUTES, 5);
   assert.equal(SPEC_VERSION, JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
 });
+
+test("v0.1.37 (C184 §2.3/§6, Admin S2): suspend/ban/lift + health rows; account_suspended; AccountMe.restriction and Health.commerce optional", async () => {
+  const admin = await import("../src/admin.ts");
+  const byId = new Map(admin.ADMIN_ROUTES.map((r) => [r.opId, r] as const));
+  assert.equal(byId.get("customers.ban")?.minRole, "owner");
+  assert.equal(byId.get("customers.ban")?.effect, "destructive");
+  assert.equal(byId.get("customers.suspend")?.stepUp, true);
+  assert.equal(byId.get("admin.health")?.minRole, "readonly");
+  const me: AccountMe = { account: { id: "acc_x", createdAt: "" }, person: { id: "per_x", email: "", name: null, imageUrl: null }, firstSignIn: false, currentWorkspaceId: null, workspaceCount: 0 };
+  assert.equal(me.restriction, undefined);
+  const h: import("../src/routes.ts").Health = { ok: true, version: "x", db: "ok" };
+  assert.equal(h.commerce, undefined);
+});

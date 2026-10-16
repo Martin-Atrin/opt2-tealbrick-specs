@@ -156,6 +156,9 @@ export type ErrorCode =
   | "operator_forbidden"
   /** v0.1.36 (C203, admin listener only): 403, the op needs a Clerk verification younger than ADMIN_STEP_UP_MAX_AGE_MINUTES */
   | "step_up_required"
+  /** v0.1.37 (C184 §2.3, C203 Q2): 403, an operator suspended or banned this account; details.kind "suspend" | "ban".
+   *  Not returned for account.me, licences.list and billing.portal (the customer can still read the notice and pay). */
+  | "account_suspended"
   | "internal";
 /** CORE §8: the one error envelope. */
 export interface ErrorEnvelope { error: { code: ErrorCode; message: string; requestId: string; details?: Record<string, unknown> } }
@@ -185,7 +188,10 @@ export interface AccountMe {
   terms?: AccountTerms;
   /** v0.1.32 (C196 ENG-6): the second-factor gate; omitted by Core before 0.1.32. */
   mfa?: AccountMfa;
+  /** v0.1.37 (C184 §2.3): present while an operator suspended or banned this account (the Portal shows the notice) */
+  restriction?: AccountRestriction;
 }
+export interface AccountRestriction { kind: "suspend" | "ban"; customerText: string | null; since: IsoTime; endsAt: IsoTime | null }
 export interface SetCurrentWorkspaceInput { ws: WorkspaceId }
 /** v0.1.32 (C196 ENG-1): a legal document the account accepts, at one version. Core keeps the ONE list (its config constant). */
 export type LegalDocId = "terms" | "dpa" | "aup" | "privacy";
@@ -1025,7 +1031,11 @@ export interface BridgeAckResult { accepted: true; configRevision: number }
 // internal
 export interface RouteRegistryDoc { digest: Digest; routes: readonly RouteOp[] }
 /** `ok` = db reachable (platform health checks must not flap on a slow sweep). v0.1.14: `deployWorker` (Core 542d51a). */
-export interface Health { ok: boolean; version: string; db: "ok" | "down"; deployWorker?: DeployWorkerHealth }
+export interface Health {
+  ok: boolean; version: string; db: "ok" | "down"; deployWorker?: DeployWorkerHealth;
+  /** v0.1.37 (ADM-8): what Core already returned untyped (CORE-02): Stripe mode + paid sessions refused in the last 30 days */
+  commerce?: { livemode: boolean; refusedSessions: number; lastRefusedAt: IsoTime | null };
+}
 export interface DeployWorkerHealth {
   /** the sweep ran < 90 s ago */
   alive: boolean;

@@ -1,5 +1,6 @@
 // Tealbrick Admin (operator plane, C184/C193/C203/C204): the ADMIN route table and its types.
 // v0.1.36 (S1): admin.me, customers.search/get, licences comp issue/list/revoke, operator audit list/verify.
+// v0.1.37 (S2): customers.suspend/unsuspend/ban/unban (+ CustomerDetail.actions), admin.health, admin.maintenance_runs.
 //
 // The admin table is SEPARATE from ROUTES: it is not in ROUTES, not in /internal/routes and not in ROUTES_DIGEST.
 // Core serves it only on its admin listener (TB_ADMIN_PORT, default 8091), never on the main listener, and the Portal GUI
@@ -151,7 +152,118 @@ export interface CustomerDetail {
   licences: Licence[];
   orders: AdminOrder[];
   comps: CompGrant[];
+  /** v0.1.37: suspend / ban history, newest first */
+  actions?: AccountAction[];
 }
+
+// ───────────────────────────── S2: account state (C184 §2.3, C203 Q2) ─────────────────────────────
+// Suspend: Core answers account_suspended to the customer's ops (except account.me, licences.list, billing.portal);
+// isEntitled is false for every licence of the account; every workspace config is re-minted at once, so the bridge drops
+// app grants within ~60 s. Ban = suspend + Clerk ban (ends Clerk sessions, blocks sign-in) + owner CLI sessions revoked +
+// pending device requests denied. Neither ever deletes data (I15). Installed software stays in the customer's hosting.
+export type AccountActionKind = "suspend" | "unsuspend" | "ban" | "unban";
+export type RestrictionReasonCode = "unpaid_dispute" | "abuse_aup" | "fraud" | "legal_order" | "security_risk" | "other";
+export const RESTRICTION_REASON_CODES = ["unpaid_dispute", "abuse_aup", "fraud", "legal_order", "security_risk", "other"] as const satisfies readonly RestrictionReasonCode[];
+/** Terms: "where reasonable, we tell you in advance". Either a notice was sent (channel + time), or none, with a reason. */
+export interface RestrictionNotice {
+  channel: "email" | "none";
+  /** required when channel is email */
+  sentAt?: IsoTime | null;
+  /** required when channel is none (3-300 chars, e.g. fraud, legal order, security) */
+  noAdvanceReason?: string | null;
+}
+export type AccountActionId = Id<"act">;
+export interface AccountAction {
+  id: AccountActionId;
+  kind: AccountActionKind;
+  reasonCode: RestrictionReasonCode | null;
+  /** shown to the customer (≤ 500) */
+  customerText: string | null;
+  /** operators only, never shown to the customer, no secrets (≤ 1000) */
+  internalNote: string | null;
+  notice: { channel: "email" | "none"; sentAt: IsoTime | null; noAdvanceReason: string | null } | null;
+  effectiveAt: IsoTime;
+  /** timed suspension: Core lifts it at this time */
+  endsAt: IsoTime | null;
+  operatorId: string;
+}
+export interface SuspendInput {
+  acc: AccountId;
+  reasonCode: RestrictionReasonCode;
+  customerText: string;
+  internalNote?: string;
+  notice: RestrictionNotice;
+  /** optional end; null/absent = until lifted */
+  endsAt?: IsoTime | null;
+}
+export interface BanInput {
+  acc: AccountId;
+  reasonCode: RestrictionReasonCode;
+  customerText: string;
+  internalNote?: string;
+  notice: RestrictionNotice;
+  /** typed confirmation: the account's email, exactly (case-insensitive) */
+  confirmEmail: string;
+}
+export interface LiftInput { acc: AccountId; internalNote?: string }
+export interface AccountStateChange {
+  account: { id: AccountId; state: CustomerState };
+  action: AccountAction;
+  configRevisions: { ws: WorkspaceId; revision: number }[];
+  /** what Clerk did: banned / unbanned, or skipped (suspend / unsuspend never call Clerk) */
+  clerk: "banned" | "unbanned" | "skipped";
+  /** owner CLI sessions revoked + device requests denied (ban only) */
+  sessionsRevoked: number;
+}
+
+// ───────────────────────────── S2: health (C184 §6) ─────────────────────────────
+export interface AdminHealthService {
+  name: string;
+  /** null = not checked (no token / not reachable from Core) */
+  ok: boolean | null;
+  version: string | null;
+  /** Railway deployment state, read-only; null when Core has no read token */
+  deploy: { status: string; at: IsoTime; commit: string | null } | null;
+  detail: string | null;
+}
+export interface AdminJobStatus {
+  job: string;
+  lastRunAt: IsoTime | null;
+  lastOk: boolean | null;
+  lastResult: Record<string, unknown> | null;
+  /** the job should leave a row at least this often (minutes); null = only when it has work */
+  expectedEveryMinutes: number | null;
+  late: boolean;
+}
+export interface AdminWorkflowStatus {
+  name: string;
+  repo: string;
+  lastRunAt: IsoTime | null;
+  status: string | null;
+  conclusion: string | null;
+  url: string | null;
+  error: string | null;
+}
+export interface AdminHealth {
+  at: IsoTime;
+  core: {
+    ok: boolean;
+    version: string;
+    db: "ok" | "down";
+    deployWorker: { alive: boolean; lastSweepAt: IsoTime | null; queued: number; unowned: number };
+    commerce: { livemode: boolean; refusedSessions: number; lastRefusedAt: IsoTime | null };
+  };
+  services: AdminHealthService[];
+  jobs: AdminJobStatus[];
+  workflows: AdminWorkflowStatus[];
+  stripe: { refusedSessions30d: number; lastRefusedAt: IsoTime | null; webhookFailures24h: number; lastWebhookAt: IsoTime | null };
+  /** bridges whose last contact is older than 1 h (count only) */
+  bridges: { total: number; quiet1h: number };
+  sources: { railway: boolean; glitchtip: boolean };
+}
+export interface MaintenanceRun { id: number; job: string; startedAt: IsoTime; finishedAt: IsoTime | null; ok: boolean; result: Record<string, unknown> }
+export type MaintenanceRunsInput = PageQuery & { job?: string };
+export type MaintenanceRunList = Page<MaintenanceRun>;
 
 /** Engineering name "comp"; the UI says "Free licence". */
 export type CompKind = "promo" | "personal" | "friends" | "partner" | "goodwill";
@@ -237,6 +349,13 @@ export interface AdminSchemaMap {
   OperatorAuditListInput: OperatorAuditListInput;
   OperatorAuditList: OperatorAuditList;
   OperatorAuditVerify: OperatorAuditVerify;
+  SuspendInput: SuspendInput;
+  BanInput: BanInput;
+  LiftInput: LiftInput;
+  AccountStateChange: AccountStateChange;
+  AdminHealth: AdminHealth;
+  MaintenanceRunsInput: MaintenanceRunsInput;
+  MaintenanceRunList: MaintenanceRunList;
 }
 export type AdminSchemaName = keyof AdminSchemaMap;
 
@@ -255,6 +374,13 @@ export const ADMIN_ROUTES = [
   { opId: "licences.comp_revoke", method: "POST", path: "/admin/v1/licences/comps/{cmp}/revoke", exposure: "admin", auth: OP, minRole: "owner", effect: "destructive", stepUp: true, rate: "admin_destructive", query: NOQ, input: "CompRevokeInput", output: "CompChange", idempotent: true },
   { opId: "operator_audit.list", method: "GET", path: "/admin/v1/operator-audit", exposure: "admin", auth: OP, minRole: "readonly", effect: "read", stepUp: false, rate: "admin_read", query: ["operator", ...PAGE], input: "OperatorAuditListInput", output: "OperatorAuditList", idempotent: false },
   { opId: "operator_audit.verify", method: "GET", path: "/admin/v1/operator-audit/verify", exposure: "admin", auth: OP, minRole: "owner", effect: "read", stepUp: false, rate: "admin_read", query: NOQ, input: "AdminEmpty", output: "OperatorAuditVerify", idempotent: false },
+  // v0.1.37 (S2)
+  { opId: "customers.suspend", method: "POST", path: "/admin/v1/customers/{acc}/suspend", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: true, rate: "admin_write", query: NOQ, input: "SuspendInput", output: "AccountStateChange", idempotent: true },
+  { opId: "customers.unsuspend", method: "POST", path: "/admin/v1/customers/{acc}/unsuspend", exposure: "admin", auth: OP, minRole: "support", effect: "write", stepUp: true, rate: "admin_write", query: NOQ, input: "LiftInput", output: "AccountStateChange", idempotent: true },
+  { opId: "customers.ban", method: "POST", path: "/admin/v1/customers/{acc}/ban", exposure: "admin", auth: OP, minRole: "owner", effect: "destructive", stepUp: true, rate: "admin_destructive", query: NOQ, input: "BanInput", output: "AccountStateChange", idempotent: true },
+  { opId: "customers.unban", method: "POST", path: "/admin/v1/customers/{acc}/unban", exposure: "admin", auth: OP, minRole: "owner", effect: "write", stepUp: true, rate: "admin_write", query: NOQ, input: "LiftInput", output: "AccountStateChange", idempotent: true },
+  { opId: "admin.health", method: "GET", path: "/admin/v1/health", exposure: "admin", auth: OP, minRole: "readonly", effect: "read", stepUp: false, rate: "admin_read", query: NOQ, input: "AdminEmpty", output: "AdminHealth", idempotent: false },
+  { opId: "admin.maintenance_runs", method: "GET", path: "/admin/v1/maintenance-runs", exposure: "admin", auth: OP, minRole: "readonly", effect: "read", stepUp: false, rate: "admin_read", query: ["job", ...PAGE], input: "MaintenanceRunsInput", output: "MaintenanceRunList", idempotent: false },
 ] as const satisfies readonly AdminRouteOp[];
 
 type AdminRow = (typeof ADMIN_ROUTES)[number];
