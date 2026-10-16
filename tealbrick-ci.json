@@ -4,5 +4,6 @@
   "paths": [
     "."
   ],
-  "images": []
+  "images": [],
+  "distBaseUrl": "https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download"
 }
