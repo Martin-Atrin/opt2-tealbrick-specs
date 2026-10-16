@@ -32,7 +32,7 @@
 - Need: SDK receipts table + hold flow must support an outward action whose payload is a third-party tool call (store tool slug, account id, kind, redacted args digest — not raw secrets/bodies). Held families relevant to Connect: first-contact DMs, profile changes, destructive, money. Ask: SDK redaction hook for receipt payloads.
 
 ## connect: catalog artifact (Company Box specs) pinning
-- Need: Tealbrick catalog = versioned artifact (OpenAPI specs + our labels: effect, hold family) pinned by sha256. Ask Lead · Platform/Specs: where the artifact is published (GitHub release asset on Martin-Atrin/opt2-tealbrick-connect? release registry?) and the manifest field for the pin (`catalog:{version, sha256, url}`).
+- Need: Tealbrick catalog = versioned artifact (OpenAPI specs + our labels: effect, hold family) pinned by sha256. Ask Lead · Platform/Specs: where the artifact is published (GitHub release asset on Tealbrick/opt2-tealbrick-connect? release registry?) and the manifest field for the pin (`catalog:{version, sha256, url}`).
 
 ## knowledge: areas as a manifest scope type (read set + one write area)
 - Need: Knowledge declares scope type `area`. Instances are created at run time inside Knowledge (the app is the authority, per DECISION-LOG "one GENERAL contract mechanism for app scopes"). Two built-in kinds: `agent` (one "memory garden" per agent, auto-created the first time an agent is tethered to Knowledge) and `shared` (one company area per workspace, created at deploy). Owner may add more areas later (not required for opt2).
@@ -271,7 +271,7 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 - Proposal (Core default until decided): the deploy recipe mounts ONE volume per service at the `data` volume's mountPath and sets `TB_BACKUP_DIR=<data mountPath>/backup` (a subdirectory). Manifests keep declaring both volumes; Core merges them for Railway. Alternative (more work): a separate backup sidecar service per app. Needs a Specs/Coordinator decision; it changes what "backup volume" means in SDK-API §13.
 
 ## tbd → platform: desktop records in the release index (C24 update feed)
-- TBD's updater reads `registry/index.json` + `.sig` (verifies Ed25519 with the pinned `release-key.pub.pem`). Needed in `opt2.release-record/v1` for TBD: `productKind: "desktop"`, `product: "tbd"`, and `artifact: {url, sha256}` (the notarized zip from the GitHub release of Martin-Atrin/opt2-tealbrick-tbd), plus optional `minimumOS` ("14.0") and `build` (CFBundleVersion). No image/manifest fields for desktop.
+- TBD's updater reads `registry/index.json` + `.sig` (verifies Ed25519 with the pinned `release-key.pub.pem`). Needed in `opt2.release-record/v1` for TBD: `productKind: "desktop"`, `product: "tbd"`, and `artifact: {url, sha256}` (the notarized zip from the GitHub release of Tealbrick/opt2-tealbrick-tbd), plus optional `minimumOS` ("14.0") and `build` (CFBundleVersion). No image/manifest fields for desktop.
 - TBD's release.sh already writes `TBD-<version>-<build>.sha256`; the release-record step can take url + sha256 from the GitHub release assets.
 
 ## platform: release index typ (blocks the SIGNED index; C29)
@@ -438,7 +438,7 @@ Until the manifest release exists the bridge codes against `types/sdk.ts` §A na
 - Ask: in `gh-build` (package branch) run the root `build` script (when present) before `cmdPackagePack`, still in the read-only build job; and fail when a packed tarball misses a path named in `files`/`main`/`exports`/`bin`.
 
 ## bridge → qa (C58, 2026-10-12): one `tealbrick agent serve` run against the test relay
-- Install: `npm i https://github.com/Martin-Atrin/opt2-tealbrick-bridge/releases/download/cli-v0.1.3/opt2-tealbrick-cli-0.1.3.tgz`.
+- Install: `npm i https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-bridge-cli-v0.1.22/opt2-tealbrick-cli-0.1.22.tgz` (current mirror release; this request named cli-v0.1.3 under the old owner).
 - Config: start from `node_modules/@opt2-tealbrick/cli/assets/agent-serve.example.json` (claude harness, user's ANTHROPIC_API_KEY) or the `.eve.` example (command harness).
 - Run: `tealbrick agent serve --file <file> [--agent <agt>]` for a logged-in agent (`tealbrick agent login ...`) whose grants include the Connect inbox tools.
 - Pass: a new Connect inbox/channel message starts exactly one turn; the reply goes out through the Connect send/reply tool; a held reply is followed and the turn resumes when the owner decides; a second message during a turn waits (concurrency 1); stopping and restarting does not re-answer old items (cursor state file).

@@ -1,9 +1,11 @@
 # REPOS — repositories, packages, dependency direction
 
+Moved to the Tealbrick org on 2026-10-16 (C206); older entries keep the old owner as history.
+
 Status: v0.1, Lead · Specs, 2026-10-11 (agreed inputs from Lead · Platform: `REPOS-PLATFORM-NOTES.md`, REQUESTS `## platform`).
 
 ## 1. Rules
-- Every repo is PUBLIC under GitHub user **Martin-Atrin**, named `opt2-tealbrick-<name>`. Never the Tealbrick org (migration there is one clean commit at release). Never push to v1 repos.
+- Every repo lives in the GitHub org **Tealbrick**, named `opt2-tealbrick-<name>` (C206; the old owner `Martin-Atrin` is history only). Visibility: the 6 shipped apps, `-platform` and `-dist` are public; the other repos are private. Never push to v1 repos.
 - Local working tree = repo name: `<workspace>/opt2-tealbrick-<name>` (one tree per repo; `<workspace>` is your local folder for the repos). Existing short folders (`sdk/`, `bridge/`, …) are renamed or removed by their owner lane before first push.
 - No secrets, no personal data, no home-infrastructure names in any repo (secret scan in CI; GitHub push protection on).
 - TypeScript only (Node 24+, type stripping for scripts/tests; `tsc --noEmit` typecheck). Exceptions: Swift in `-tbd` (macOS app); config files a tool requires as JS. No `.js`/`.mjs` sources.
@@ -15,7 +17,7 @@ Status: v0.1, Lead · Specs, 2026-10-11 (agreed inputs from Lead · Platform: `R
 |---|---|---|---|
 | opt2-tealbrick-specs | Specs & SDK | `@opt2-tealbrick/spec` (data only: JSON Schemas, `types/*.ts`, route table, the shared vocabularies — re-exported by `manifest`) + the spec markdown | Mirrors `coordination/specs/` at freeze; tag `spec-v<semver>` |
 | opt2-tealbrick-sdk | Specs & SDK | `@opt2-tealbrick/manifest` (validator, digest, JCS, JWS, key sets, `verifyGrant`/`gate`/`authorize`, vocabularies), `@opt2-tealbrick/miniapp-sdk` (server + client), `create-tealbrick-miniapp` (template), `@opt2-tealbrick/conformance` (checks + fake Portal + fake bridge) | The only owner of crypto/canonical primitives |
-| opt2-tealbrick-bridge | Bridge & Harness | `@opt2-tealbrick/bridge` (core, both forms), `bridge-server` (deployed Docker image `ghcr.io/martin-atrin/opt2-tealbrick-bridge`), `tealbrick` CLI (owner mode, agent mode, local relay), `@opt2-tealbrick/harness-claude`, `@opt2-tealbrick/harness-eve` | Eve code only in harness-eve |
+| opt2-tealbrick-bridge | Bridge & Harness | `@opt2-tealbrick/bridge` (core, both forms), `bridge-server` (deployed Docker image `ghcr.io/tealbrick/opt2-tealbrick-bridge-server`), `tealbrick` CLI (owner mode, agent mode, local relay), `@opt2-tealbrick/harness-claude`, `@opt2-tealbrick/harness-eve` | Eve code only in harness-eve |
 | opt2-tealbrick-packages | Portal GUI (ui) · Bridge & Harness (buzz, avm) | `@opt2-tealbrick/ui` (design system + app shell component), `@opt2-tealbrick/buzz` (with voice), `@opt2-tealbrick/avm` | NEW repo — Lead · Platform creates it (REQUESTS) |
 | opt2-tealbrick-portal-core | Portal Core | Core service (JSON API, private) | Imports `@opt2-tealbrick/spec` + `@opt2-tealbrick/manifest` only |
 | opt2-tealbrick-portal-gui | Portal GUI | GUI service + generated gateway | No app code, no app list; imports spec (routes), ui |
@@ -50,10 +52,11 @@ PRD §9 package check: manifest, miniapp-sdk, create-tealbrick-miniapp, conforma
 ## 5. Cross-repo distribution (no npm publish)
 - Scope **`@opt2-tealbrick/*`**. These names are NOT published to any registry (no npm publish is allowed in opt2) and are deliberately different from v1's `tealbrick` / `@tealbrick/*` names, so a stray registry lookup can never pull v1 code.
 - Each release of a multi-package repo attaches one `npm pack` tarball per package to a GitHub Release (tag `<package>-v<semver>`, e.g. `manifest-v0.1.0`). Consumers depend by URL:
-  `"@opt2-tealbrick/manifest": "https://github.com/Martin-Atrin/opt2-tealbrick-sdk/releases/download/manifest-v0.1.0/opt2-tealbrick-manifest-0.1.0.tgz"`.
-  Public, no auth, works with pnpm/npm, ships built `dist/`. (Plain git deps would need a build at install and do not handle sub-packages well.)
+  `"@opt2-tealbrick/manifest": "https://github.com/Tealbrick/opt2-tealbrick-dist/releases/download/opt2-tealbrick-sdk-manifest-v0.1.18/opt2-tealbrick-manifest-0.1.18.tgz"`.
+  The private source repos publish the tarball; the public mirror `opt2-tealbrick-dist` re-hosts it as release `<source repo>-<tag>`.
+  The mirror is public, needs no auth, works with pnpm/npm, ships built `dist/`. (Plain git deps would need a build at install and do not handle sub-packages well.)
 - CI check (template): every `@opt2-tealbrick/*` dependency must be a GitHub-release URL; a registry version string fails the build.
-- Container images: `ghcr.io/martin-atrin/opt2-tealbrick-<repo>[-<component>]`, public, referenced by digest in release records.
+- Container images: `ghcr.io/tealbrick/opt2-tealbrick-<repo>[-<component>]`, referenced by digest in release records. Releases made before C206 stay in `ghcr.io/martin-atrin/…` (history; never delete them).
 - Release records (product, version, manifest digest, image digest, channel) go to the signed release registry in `-platform`; the bridge is a release there too (kind `bridge`).
 
 ## 6. Requests to Lead · Platform (also appended to REQUESTS.md)
