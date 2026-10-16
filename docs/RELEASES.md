@@ -1,4 +1,6 @@
-# opt2 package releases (Coordinator keeps this current; use these URLs as deps)
+# opt2 package releases (Coordinator keeps this current)
+
+The URLs below are historical records: each row keeps the owner and host used when it was published (user Martin-Atrin, before C206). Current installs use the mirror release in `Tealbrick/opt2-tealbrick-dist` (`<source repo>-<tag>`, e.g. `opt2-tealbrick-sdk-manifest-v0.1.18`).
 
 Each row ends with `integrity sha512-…` = the npm/pnpm lockfile value of that tarball (F27; from template ci-v9.5 the release also carries `<tarball>.integrity`). Backfilled 2026-10-13 from the published tarballs, checked against each row's sha256 where it had one.
 
