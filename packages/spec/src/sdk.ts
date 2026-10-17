@@ -62,6 +62,7 @@ import type {
   ManifestValidation,
   Operation,
   OperationAudience,
+  ProductId,
   Skill,
   StandardOperationId,
 } from "./manifest.ts";
@@ -326,9 +327,15 @@ export interface Caller {
   type: "agent" | "app" | "person";
   /** agt_ / ins_ / per_ */
   id: AgentId | InstanceId | PersonId;
+  /** DISPLAY ONLY (agent card name, app manifest name, person name). Never an identity: two apps may share a name. */
   name: string;
   /** agents only */
   mode: AgentMode | null;
+  /** v0.1.44 (SDK-CALLER-PRODUCT, security): app callers only — the VERIFIED product id of the calling app, from the signed
+   *  slice `companionCallers[]` entry whose `ins` equals the verified grant's caller instance. Apps that decide anything per
+   *  calling app (data sharing, routing, "is this Observer?") key on `product` (and `id`), NEVER on `name`. Absent for
+   *  agent and person callers, and for an app caller that is not in the slice (the SDK refuses such a call anyway). */
+  product?: ProductId;
 }
 
 export interface Logger {
@@ -582,7 +589,7 @@ export interface Receipt {
   /** hld_<ULID> when created by a hold, else rcp_<ULID> */
   id: `hld_${Ulid}` | `rcp_${Ulid}`;
   callId: CallId | null;
-  caller: { type: "agent" | "app"; id: AgentId | InstanceId; name: string };
+  caller: { type: "agent" | "app"; id: AgentId | InstanceId; name: string; /** v0.1.44: app callers, verified product id */ product?: ProductId };
   op: string;
   effect: Effect;
   holdFamily: HoldFamily | "caps" | "policy" | null;
@@ -634,7 +641,7 @@ export interface HoldsPendingItem {
   heldBy: string | null;
   /** the receipt summary (redacted, ≤ 280) */
   summary: string;
-  caller: { type: "agent" | "app"; id: AgentId | InstanceId; name: string };
+  caller: { type: "agent" | "app"; id: AgentId | InstanceId; name: string; /** v0.1.44: app callers, verified product id */ product?: ProductId };
   createdAt: IsoTime;
   ageS: number;
   /** app-relative decision page path `/holds/<id>`; open it with a Portal launch ticket (tickets.launch {product, path}) */
