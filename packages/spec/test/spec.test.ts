@@ -286,5 +286,16 @@ test("v0.1.41 (G3 R1, F126): draft loosening list, confirmLoosening, device-crea
   const apply: import("../src/routes.ts").DraftApplyInput = { drf: "drf_01M4TW2PPZT5S353V9NPEQK8JF", revision: 2, confirm: true, confirmLoosening: [item.id] };
   const by: import("../src/routes.ts").Draft["createdBy"] = { kind: "device", id: "dev_01M4TW2PPZT5S353V9NPEQK8JF" };
   assert.ok(apply.confirmLoosening?.includes(item.id) && by.kind === "device");
+  const m = await import("../src/manifest.ts");
+  assert.ok((m.HOLD_FAMILIES as readonly string[]).includes("public_link"));
+  assert.ok((m.HOOK_HOLD_FAMILIES as readonly string[]).includes("public_link"));
+  assert.deepEqual([...m.DEFAULT_HELD_FAMILIES], ["destructive", "money", "first_contact", "identity", "public_link"]);
+  assert.ok(!(m.DEFAULT_HELD_FAMILIES as readonly string[]).includes("outward")); // outward stays offered-only (C107)
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  const validate = ajv.compile(load("manifest.schema.json"));
+  const ex = JSON.parse(readFileSync(new URL("../examples/notes.manifest.json", import.meta.url), "utf8"));
+  const op = { ...ex.operations.find((o: { effect: string }) => o.effect === "write"), id: "page_share", effect: "outward", holdFamily: "public_link", receipt: true };
+  assert.equal(validate({ ...ex, operations: [...ex.operations, op] }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...ex, operations: [...ex.operations, { ...op, holdFamily: "public_links" }] }), false);
   assert.equal(SPEC_VERSION, "0.1.41");
 });
