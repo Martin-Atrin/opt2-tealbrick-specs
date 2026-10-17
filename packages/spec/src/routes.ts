@@ -1065,13 +1065,38 @@ export interface Draft {
   title: string;
   revision: number;
   state: DraftState;
-  createdBy: { kind: "owner_session"; id: OwnerSessionId; label: string } | { kind: "browser" } | { kind: "recipe"; title: string };
+  /** v0.1.41: + `device` = the draft an agent device approval (adopt, C96) wrote and applied at once; `id` = the device request. */
+  createdBy: { kind: "owner_session"; id: OwnerSessionId; label: string } | { kind: "browser" } | { kind: "recipe"; title: string } | { kind: "device"; id: DeviceRequestId };
   steps: DraftStepView[];
   confirmCount: number;
   requiresPurchase: boolean;
   result: ApplyResult | null;
   createdAt: IsoTime;
   updatedAt: IsoTime;
+  /** v0.1.41 (G3 R1, F126): the recipe's own text (what the recipe CLAIMS to do; shown as a claim, never as Portal text) */
+  description?: string | null;
+  /** v0.1.41 (G3 R1, F126): every step that LOWERS protection, recomputed by Core against the current state on every read
+   *  (empty once applied). drafts.apply needs each id in `confirmLoosening`. Older Core omits it. */
+  loosening?: LooseningItem[];
+}
+/** v0.1.41 (G3 R1, F126): one step that lowers protection: an owner approval turned off (card or apps-policy hold family),
+ *  a cap raised or removed, a bound card set free or its workflow widened, a hook switched off, a grant that adds write
+ *  access, an op-limited grant widened, a write connection switched on, a paused card resumed. Read-only access and
+ *  tightening steps are never items. */
+export interface LooseningItem {
+  /** `<step n>:<setting key>`, stable for one draft revision */
+  id: string;
+  /** the step number */
+  n: number;
+  opId: string;
+  /** what the setting belongs to, e.g. `Agent "Sales" (new in step 1)` */
+  subject: string;
+  /** the setting in words, e.g. `Ask you before deleting or removing things` */
+  setting: string;
+  before: string;
+  after: string;
+  /** optional plain detail, e.g. the write operations a grant unlocks */
+  detail?: string;
 }
 export interface DraftSummary {
   id: DraftId;
@@ -1097,7 +1122,11 @@ export interface DraftValidation {
 }
 /** v0.1.33 (C200): `buyer` = the person's checkout choice, required when the draft has a payment step; it replaces any
  *  `buyer` inside the draft's checkout steps (an agent never chooses it). */
-export interface DraftApplyInput { drf: DraftId; revision: number; confirm: true; buyer?: CheckoutBuyer }
+/** v0.1.41 (G3 R1, F126): `confirmLoosening` = exactly the ids of Core's recomputed `Draft.loosening` list, each ticked by
+ *  the person (one confirmation per item). A different set → 400 `validation_failed` details.reason `loosening_unconfirmed`
+ *  (+ `details.loosening` = the current list, `pointer: "/confirmLoosening"`). A draft with loosening items is applied only
+ *  by a person principal (browser); any other principal → 403 `forbidden`. */
+export interface DraftApplyInput { drf: DraftId; revision: number; confirm: true; buyer?: CheckoutBuyer; confirmLoosening?: string[] }
 export interface DraftRejectInput { drf: DraftId; reason?: string }
 /** Exported recipe: steps without workspace-bound ids (`ws` stripped; other ids must be $refs). */
 export interface Recipe { format: "tealbrick.recipe/1"; title: string; description: string | null; steps: DraftStep[] }

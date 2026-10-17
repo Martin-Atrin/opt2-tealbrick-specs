@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.tealbrick.com/opt2/contracts/messages/1.schema.json",
+  "title": "messages/1 — one message row of the Connect `messages` dataset (data_pull)",
+  "description": "v0.1.41 (C230, R3, knowledge S-9, FOUNDRY-DESIGN v2 §3.4). Producer: connect (data_pull dataset `messages`). Consumers: knowledge (foundry), observer. Text is untrusted input (APP-11(f)): `untrusted` is always true. Extra members are allowed and ignored (L24). A provider deletion arrives as a row with deleted: true and empty text.",
+  "$defs": {
+    "row": {
+      "type": "object",
+      "required": ["id", "conversation", "sentAt", "author", "text", "attachments", "untrusted"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "conversation": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "thread": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "sentAt": { "type": "string", "format": "date-time" },
+        "editedAt": { "type": "string", "format": "date-time" },
+        "deleted": { "type": "boolean" },
+        "author": {
+          "type": "object",
+          "required": ["kind", "handle"],
+          "properties": {
+            "kind": { "enum": ["person", "bot", "self"] },
+            "handle": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "display": { "type": "string", "maxLength": 128 }
+          }
+        },
+        "text": { "type": "string", "maxLength": 65536 },
+        "attachments": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "required": ["name", "mime", "bytes"],
+            "properties": {
+              "name": { "type": "string", "maxLength": 255 },
+              "mime": { "type": "string", "maxLength": 127 },
+              "bytes": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "untrusted": { "const": true }
+      }
+    },
+    "page": {
+      "type": "object",
+      "description": "data_pull answer for dataset messages: ≤ 200 rows, ≤ 2 MiB (S-7).",
+      "required": ["rows", "nextCursor", "exhausted"],
+      "properties": {
+        "rows": { "type": "array", "maxItems": 200, "items": { "$ref": "#/$defs/row" } },
+        "nextCursor": { "oneOf": [{ "type": "string", "maxLength": 512 }, { "type": "null" }] },
+        "anchor": { "type": "string", "maxLength": 512 },
+        "exhausted": { "type": "boolean" },
+        "retryAfterS": { "type": "integer", "minimum": 1, "maximum": 3600 }
+      }
+    }
+  },
+  "$ref": "#/$defs/page"
+}
