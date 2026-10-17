@@ -338,5 +338,10 @@ test("v0.1.45 (HOOK-CALLER-PRODUCT): hook call info carries the verified product
     target: { instance: "ins_01M53BAEQSGKVVY4PRM2VE6FBG" as never, product: "connect", op: "data_pull", crud: ["read"], effect: "read" },
   };
   assert.equal(call.caller.product, "observer");
-  assert.equal(SPEC_VERSION, "0.1.45");
+});
+
+test("v0.1.46 (GRANT-PRD): a companion grant may carry the signed product of its subject", async () => {
+  const c: Pick<import("../src/credentials.ts").CompanionGrantClaims, "sub" | "mode" | "prd"> = { sub: "tb:ins:01M53BAEQSGKVVY4PRM2VE6FBF" as never, mode: "bound", prd: "observer" };
+  assert.equal(c.prd, "observer");
+  assert.equal(SPEC_VERSION, "0.1.46");
 });
