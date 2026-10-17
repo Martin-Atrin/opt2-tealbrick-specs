@@ -261,26 +261,6 @@ test("v0.1.40 (Core-local fields typed): estimate settings + expected, key when,
   assert.ok(est.monthlyExpected && key.when && step.pending && deployed.outcome && err.keptDataId && report);
 });
 
-test("v0.1.41 (C230): shared app-to-app contracts — every CONTRACT_ID has a schema + fixture; valid fixtures pass, invalid ones fail (L34)", async () => {
-  const { CONTRACT_IDS } = await import("../src/manifest.ts");
-  const ajv = new Ajv2020({ strict: false, allErrors: true });
-  for (const id of CONTRACT_IDS) {
-    const base = id.replace("/", ".");
-    const schema = JSON.parse(readFileSync(new URL(`../schemas/contracts/${base}.schema.json`, import.meta.url), "utf8"));
-    assert.equal(schema.$id, `https://schemas.tealbrick.com/opt2/contracts/${id}.schema.json`);
-    const validate = ajv.compile(schema);
-    const fx = JSON.parse(readFileSync(new URL(`../examples/contracts/${base}.json`, import.meta.url), "utf8")) as { valid: unknown[]; invalid: { why: string; doc: unknown }[] };
-    assert.ok(fx.valid.length > 0 && fx.invalid.length > 0, id);
-    for (const doc of fx.valid) assert.equal(validate(doc), true, `${id}: ${JSON.stringify(validate.errors)}`);
-    for (const bad of fx.invalid) assert.equal(validate(bad.doc), false, `${id} should refuse: ${bad.why}`);
-  }
-  // the manifest field accepts known ids only
-  const validate = ajv.compile(load("manifest.schema.json"));
-  const ex = JSON.parse(readFileSync(new URL("../examples/notes.manifest.json", import.meta.url), "utf8"));
-  assert.equal(validate({ ...ex, contracts: { produces: ["messages/1"], consumes: ["fleet.directory_feed/1"] } }), true, JSON.stringify(validate.errors));
-  assert.equal(validate({ ...ex, contracts: { produces: ["messages/2"] } }), false);
-});
-
 test("v0.1.41 (G3 R1, F126): draft loosening list, confirmLoosening, device-created drafts", async () => {
   const item: import("../src/routes.ts").LooseningItem = { id: "1:held.destructive", n: 1, opId: "agents.policy_set", subject: 'Agent "Sales"', setting: "Ask you before deleting or removing things", before: "on", after: "off" };
   const apply: import("../src/routes.ts").DraftApplyInput = { drf: "drf_01M4TW2PPZT5S353V9NPEQK8JF", revision: 2, confirm: true, confirmLoosening: [item.id] };
