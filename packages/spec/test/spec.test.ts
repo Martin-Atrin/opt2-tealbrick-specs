@@ -328,5 +328,15 @@ test("v0.1.44 (SDK-CALLER-PRODUCT): app callers carry the verified product id; n
   const r: import("../src/sdk.ts").Receipt["caller"] = { type: "app", id: c.id as never, name: c.name, product: c.product };
   assert.notEqual(c.product, c.name.toLowerCase()); // the name may claim anything; product is the identity
   assert.ok(r.product);
-  assert.equal(SPEC_VERSION, "0.1.44");
+});
+
+test("v0.1.45 (HOOK-CALLER-PRODUCT): hook call info carries the verified product of an app caller", async () => {
+  const call: import("../src/bridge.ts").HookCallInfo = {
+    id: "call_01M53BAEQSGKVVY4PRM2VE6FBF" as never,
+    ws: "ws_01M53BAEQSGKVVY4PRM2VE6FBF" as never,
+    caller: { type: "app", id: "ins_01M53BAEQSGKVVY4PRM2VE6FBF" as never, product: "observer" },
+    target: { instance: "ins_01M53BAEQSGKVVY4PRM2VE6FBG" as never, product: "connect", op: "data_pull", crud: ["read"], effect: "read" },
+  };
+  assert.equal(call.caller.product, "observer");
+  assert.equal(SPEC_VERSION, "0.1.45");
 });
