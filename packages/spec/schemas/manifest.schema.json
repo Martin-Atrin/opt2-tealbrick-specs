@@ -80,7 +80,7 @@
     "crudAction": { "enum": ["create", "read", "update", "delete"] },
     "crudSet": { "type": "array", "minItems": 1, "maxItems": 4, "uniqueItems": true, "items": { "$ref": "#/$defs/crudAction" } },
     "effect": { "enum": ["read", "write", "outward", "destructive", "money"] },
-    "holdFamily": { "enum": ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity"] },
+    "holdFamily": { "enum": ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity", "public_link"] },
     "condition": {
       "type": "object",
       "minProperties": 1,

@@ -11,16 +11,19 @@ export const CRUD_ACTIONS = ["create", "read", "update", "delete"] as const;
 export const EFFECTS = ["read", "write", "outward", "destructive", "money"] as const;
 /** v0.1.16 (C107): + `outward` (messages, posts, reactions, edits to existing contacts or channels) and `identity`
  *  (changes to the agent's public identity). Every op with outward effects declares a family. */
-export const HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity"] as const;
+/** v0.1.41 (C167, C232, LA-2): + `public_link` (an action that makes agent-written content visible to people outside the
+ *  workspace: create a viewer link, or make new content live on a page that has an active link). */
+export const HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity", "public_link"] as const;
 /** v0.1.15 (C105): the families an op may declare (= HOLD_FAMILIES; the name Core, GUI and conformance import). */
 export const KNOWN_HOLD_FAMILIES = HOLD_FAMILIES;
 /** v0.1.15 (C105, QA S2: a first-contact DM went out unheld on a default card): the held families of a NEW agent card
  *  and of companion grants (CORE I8 "workspace default held families"). `money` is held always, listed for clarity. */
 /** v0.1.16 (C107): + `identity`; `outward` is known but NOT held by default (Free-card caps apply; the owner can turn on
  *  "ask me before every message"). */
-export const DEFAULT_HELD_FAMILIES = ["destructive", "money", "first_contact", "identity"] as const;
+/** v0.1.41 (C232): + `public_link` — held for every NEW card and new workspace; existing ones get it OFFERED (C107a). */
+export const DEFAULT_HELD_FAMILIES = ["destructive", "money", "first_contact", "identity", "public_link"] as const;
 /** v0.1.13 (G1): families a before hook may hold with = HOLD_FAMILIES + `policy` (a policy app decided). Ops never declare `policy`. */
-export const HOOK_HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity", "policy"] as const;
+export const HOOK_HOLD_FAMILIES = ["first_contact", "profile_change", "live_call", "destructive", "money", "outward", "identity", "public_link", "policy"] as const;
 export const AGENT_MODES = ["free", "bound"] as const;
 export const HOOK_PHASES = ["before", "context", "after"] as const;
 export const IDEMPOTENCY_MODES = ["required", "supported", "none"] as const;
@@ -38,6 +41,7 @@ export const HARNESS_KINDS = ["generic", "claude_desktop", "codex_desktop", "tbd
 export const STANDARD_OPERATIONS = ["tb.hold_status", "tb.holds_list", "tb.holds_decide", "tb.receipts_list", "tb.agents_list", "tb.scopes_set", "tb.keys_status", "tb.key_set", "tb.key_delete", "tb.export", "tb.holds_pending"] as const;
 /** v0.1.13 (G4): the ONE op a wildcard companion (`product: "*"`) may name (MANIFEST M-CP-3); needs owner consent at deploy (C82). */
 export const WILDCARD_COMPANION_OPS = ["tb.holds_pending"] as const;
+
 
 export type CrudAction = (typeof CRUD_ACTIONS)[number];
 export type Effect = (typeof EFFECTS)[number];
