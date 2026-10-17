@@ -118,7 +118,7 @@ export interface Manifest {
   publicRoutes?: PublicRoute[];
   ui?: Ui;
   /** v0.1.42 (C230): the shared app-to-app contracts this app writes (`produces`) and reads (`consumes`). A manifest with this
-   *  field needs a validator from manifest 0.1.21 on: the release must state `requires.bridge` of a bridge that pins it. */
+   *  field needs a validator from manifest 0.1.20 on: the release must state `requires.bridge` of a bridge that pins it. */
   contracts?: { produces?: ContractId[]; consumes?: ContractId[] };
 }
 
