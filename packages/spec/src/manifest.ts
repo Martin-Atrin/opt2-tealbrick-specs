@@ -34,7 +34,13 @@ export const DEFAULT_GRANT_KINDS = ["own", "shared", "all"] as const;
 export const KEY_SOURCES = ["account_default", "app_own"] as const;
 export const SETTING_TYPES = ["string", "text", "integer", "number", "boolean", "enum", "url"] as const;
 export const VOLUME_PURPOSES = ["data", "backup"] as const;
-export const PUBLIC_ROUTE_PURPOSES = ["oauth_callback", "webhook"] as const;
+/** v0.1.43 (LA-1, C232): + `viewer` — a prefix route served ONLY on the workspace views service origin (tb-views), never on
+ *  the bridge main or keys origin. MANIFEST M-PR-2: at most one viewer route, path `/v`; the segment `_d` right after
+ *  `/v/<product>/` is reserved for untrusted documents (sandbox CSP enforced by tb-views). */
+export const PUBLIC_ROUTE_PURPOSES = ["oauth_callback", "webhook", "viewer"] as const;
+/** v0.1.43 (LR-1, C234): `workflow` = an agent op that is listed in tools/list and passes gate() ONLY when the grant's `wf`
+ *  names it (machine ops). `default` (or absent) = today's rule. */
+export const OPERATION_LISTINGS = ["default", "workflow"] as const;
 export const CATEGORIES = ["memory", "connectivity", "communication", "automation", "governance", "operations", "productivity", "developer"] as const;
 export const HARNESS_KINDS = ["generic", "claude_desktop", "codex_desktop", "tbd", "claude_agent_sdk", "eve", "tealbrick_cli"] as const;
 /** Standard operations every SDK app serves automatically (MANIFEST.md §5.4): one agent op, the rest person ops. Manifest ids never start with `tb_`. */
@@ -60,6 +66,7 @@ export type KeySource = (typeof KEY_SOURCES)[number];
 export type SettingType = (typeof SETTING_TYPES)[number];
 export type VolumePurpose = (typeof VOLUME_PURPOSES)[number];
 export type PublicRoutePurpose = (typeof PUBLIC_ROUTE_PURPOSES)[number];
+export type OperationListing = (typeof OPERATION_LISTINGS)[number];
 export type Category = (typeof CATEGORIES)[number];
 export type HarnessKind = (typeof HARNESS_KINDS)[number];
 export type StandardOperationId = (typeof STANDARD_OPERATIONS)[number];
@@ -225,6 +232,8 @@ export interface Operation {
   receipt: boolean;
   audience: OperationAudience;
   dynamic?: DynamicSpec;
+  /** v0.1.43 (LR-1): agent ops only; see OPERATION_LISTINGS. A manifest using it needs a validator from manifest 0.1.21 on. */
+  listing?: OperationListing;
 }
 
 /** One entry of a dynamic operation's catalog (bridge op `POST /tb/v1/bridge/catalog`, search results). */

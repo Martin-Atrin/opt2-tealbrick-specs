@@ -254,6 +254,7 @@
         "idempotency": { "enum": ["required", "supported", "none"] },
         "receipt": { "type": "boolean" },
         "audience": { "enum": ["agent", "person"] },
+        "listing": { "enum": ["default", "workflow"], "description": "v0.1.43 (LR-1): agent ops only; workflow = listed and callable only when the grant wf names the op." },
         "dynamic": { "$ref": "#/$defs/dynamic" }
       }
     },
@@ -495,7 +496,7 @@
       "required": ["path", "purpose"],
       "properties": {
         "path": { "$ref": "#/$defs/appPath" },
-        "purpose": { "enum": ["oauth_callback", "webhook"] }
+        "purpose": { "enum": ["oauth_callback", "webhook", "viewer"] }
       }
     },
     "ui": {

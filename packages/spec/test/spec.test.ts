@@ -302,5 +302,24 @@ test("v0.1.42 (C230, owners' review): shared app-to-app contracts — schema + f
   const ex = JSON.parse(readFileSync(new URL("../examples/notes.manifest.json", import.meta.url), "utf8"));
   assert.equal(validate({ ...ex, contracts: { produces: ["messages/1"], consumes: ["fleet.directory_feed/1"] } }), true, JSON.stringify(validate.errors));
   assert.equal(validate({ ...ex, contracts: { produces: ["messages/2"] } }), false);
-  assert.equal(SPEC_VERSION, "0.1.42");
+});
+
+test("v0.1.43 (LA-1, LR-1): viewer route purpose, workflow listing, slice viewUrl, StatusReport.views", async () => {
+  const m = await import("../src/manifest.ts");
+  assert.deepEqual([...m.PUBLIC_ROUTE_PURPOSES], ["oauth_callback", "webhook", "viewer"]);
+  assert.deepEqual([...m.OPERATION_LISTINGS], ["default", "workflow"]);
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".json"))) ajv.addSchema(load(f));
+  const validate = ajv.getSchema(load("manifest.schema.json").$id);
+  assert.ok(validate);
+  const ex = JSON.parse(readFileSync(new URL("../examples/notes.manifest.json", import.meta.url), "utf8"));
+  const agentOp = ex.operations.find((o: { audience: string }) => o.audience === "agent");
+  assert.equal(validate({ ...ex, publicRoutes: [{ path: "/v", purpose: "viewer" }] }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...ex, publicRoutes: [{ path: "/v", purpose: "viewers" }] }), false);
+  assert.equal(validate({ ...ex, operations: [...ex.operations.filter((o: unknown) => o !== agentOp), { ...agentOp, listing: "workflow" }] }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...ex, operations: [...ex.operations.filter((o: unknown) => o !== agentOp), { ...agentOp, listing: "hidden" }] }), false);
+  const views: import("../src/bridge.ts").StatusReport["views"] = { url: "https://tb-views-x.up.railway.app", ok: true, lastCheckAt: "2026-10-17T13:00:00Z" };
+  const slice: Pick<import("../src/bridge.ts").InstanceSlice, "bridge"> = { bridge: { id: "brg_01M53BAEQSGKVVY4PRM2VE6FBF", keys: [], publicUrl: "https://b.up.railway.app", viewUrl: null } };
+  assert.ok(views?.ok && slice.bridge.viewUrl === null);
+  assert.equal(SPEC_VERSION, "0.1.43");
 });
