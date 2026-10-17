@@ -280,3 +280,6 @@ Bridge key store (sealed, bridge volume) holds workspace default keys (manifest 
 | I16 | Own-infrastructure bridge enrolment (PRD §3.5, J3) is live in opt2 under an "Advanced" panel; only Coolify as a deploy PROVIDER is greyed out. |
 | I17 | Offers are reviewed data shipped in the signed release index (`-platform`) and verified against Stripe at Core start; no env-var offer lists. |
 | I18 | `drafts.validate` exists (owner-cli + browser, read-class): validates a draft against the route table and current state without applying. |
+
+## v0.1.43 — the workspace views service (LA-1, C232)
+Core creates `tb-views` (the bridge image with `TB_ROLE=views`, same digest as the bridge) only when the workspace deploys an app whose release manifest has a `viewer` public route; order: empty service → env (`TB_ROLE`, `TB_VIEWS_UPSTREAM` = bridge private URL, `TB_VIEWS_KEY` generated + sealed, also set on the bridge) → one generated domain → image → one deploy (L5, L40). The next signed config carries `bridge.viewUrl`. A bridge update also updates tb-views (after the bridge is healthy). Removal: when the last viewer app is removed, and always with the bridge; tb-views has no volume, so nothing is kept (no kept-data item). The cost estimate shows a "Page viewer service" line. Own-infra bridges: the operator runs a second container with `TB_ROLE=views`.

@@ -386,6 +386,9 @@ export interface OpContext {
   signal: AbortSignal;
   /** v0.1.3 (C31): bridge public origin from the slice (`bridge.publicUrl`); null until known */
   publicUrl: string | null;
+  /** v0.1.43 (LA-1, C232): the workspace views service origin from the slice (`bridge.viewUrl`); null until Core created it.
+   *  Optional for SDKs before 0.1.26. */
+  viewUrl?: string | null;
   /** v0.1.3 (C31) */
   workspace: WorkspaceId;
   /** v0.1.3 (C31): create scope instances outside events.agentAdded (person ops, public routes) */
@@ -486,6 +489,8 @@ export type PublicHandler = (
     getKey(name: string): Promise<string | null>;
     /** v0.1.3 (C31) */
     publicUrl: string | null;
+    /** v0.1.43 (LA-1): tb-views origin or null (SDK >= 0.1.26) */
+    viewUrl?: string | null;
     workspace: WorkspaceId;
     scopes: Pick<ScopeStore, "instances">;
     secrets: AppSecrets;

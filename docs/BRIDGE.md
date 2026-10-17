@@ -394,3 +394,17 @@ None open for the bridge after C15/C16 and CORE §14. Settled items recorded for
   - ABSENT from `config.hooks`, or its app is down / unreachable / not claimed → the call is refused `hook_failed` (fail closed; message names the hook and "not active" / "app unavailable"). Never forwarded without it.
 - A hook therefore leaves the gate only by an explicit owner action (switch off, remove the app), never because of a run state, an update in progress, a licence lapse or a missing config bump.
 - v0.1.25 (bridge 0.1.22): the bridge reports a matching declared hook that is missing from `config.hooks` as StatusReport `rejected[]` kind `config`, code `hook_not_listed`, with `ins` = the hook app's instance.
+
+## v0.1.43 — views role (LA-1, C232) and size limits (OD-9)
+- Views role: the bridge image started with `TB_ROLE=views` is the workspace views service (tb-views). No volume, no Portal connection, no enrolment, no keys; it refuses to start if `TB_ENROL_CODE`, `TB_KEK` or `TB_PORTAL_URL` is set. It serves `GET /v/<product>/…`, `/healthz`, `/readyz`; everything else 404; HEAD/OPTIONS 405. It forwards to the bridge PRIVATE listener `GET /tb/v1/views/<product>/<rest>` with header `TB-Views-Key` (Core-generated `TB_VIEWS_KEY`, constant-time compare; wrong or missing → 404). Edge duties: request header allow-list (MANIFEST v0.1.43), 120 req/min per client IP (first `X-Forwarded-For` hop) + 32 in flight (503 `Retry-After`), body ≤ 2 MiB, 10 s, strip `Set-Cookie`/`Access-Control-*`, `VIEWER_HEADER_FLOOR`, the `_d` CSP gate. The bridge private route checks pause (503 `paused`), routes to the instance with the viewer route, applies the floor and the `_d` gate again, and reports `StatusReport.views {url, ok, lastCheckAt}` from a `/readyz` probe.
+- Size limits enforced today (OD-9; numbers from the code, bridge 0.1.32 / miniapp-sdk 0.1.25):
+  | Path | Request | Response | Time |
+  |---|---|---|---|
+  | Agent op (`POST /mcp`, JSON-RPC) | ≤ 2 MiB at the bridge; ≤ 4 MiB read by the SDK | app result ≤ 4 MiB | 30 s to the app |
+  | Companion call (`/tb/v1/call`, private) | ≤ 2 MiB | ≤ 4 MiB | 30 s |
+  | Person op / app UI (`/a/<product>/…`) | ≤ 10 MiB | not capped by the bridge (streamed) | 60 s socket idle |
+  | Public route (`/p/<product>/…`) | ≤ 1 MiB | not capped by the bridge (streamed) | 60 s socket idle |
+  | Views (`/v/<product>/…`, v0.1.43) | GET only | ≤ 2 MiB | 10 s |
+  | Hook answers, bridge-op answers | – | ≤ 256 KiB | – |
+  Apps that carry files in JSON (base64) size them below these limits; a larger file needs a streaming route (OD-2, later).
+

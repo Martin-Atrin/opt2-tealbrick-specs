@@ -95,6 +95,10 @@
             "$ref": "workspace-config.schema.json#/$defs/ed25519Jwk"
           }
         },
+        "viewUrl": {
+          "oneOf": [{ "$ref": "workspace-config.schema.json#/$defs/httpsUrl" }, { "type": "null" }],
+          "description": "v0.1.43 (LA-1, C232): the origin of the workspace views service (tb-views) or null when none exists yet; apps answer view_origin_missing (409) while null."
+        },
         "publicUrl": {
           "$ref": "workspace-config.schema.json#/$defs/httpsUrl",
           "description": "v0.1.10 (C64): the bridge's public origin; apps build third-party callback URLs `<publicUrl>/p/<product><path>` from it (SDK OpContext.publicUrl). Core MUST emit it once the bridge's public URL is known."

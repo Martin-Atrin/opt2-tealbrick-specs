@@ -200,7 +200,7 @@ export interface InstanceSlice extends SliceClaims {
   product: ProductId;
   portalKeys: PortalKeyEntry[];
   /** keys the app accepts for call proofs; v0.1.10 (C64) `publicUrl` = bridge public origin (OpContext.publicUrl) */
-  bridge: { id: BridgeId; keys: Ed25519PublicJwk[]; publicUrl?: string };
+  bridge: { id: BridgeId; keys: Ed25519PublicJwk[]; publicUrl?: string; /** v0.1.43 (LA-1): tb-views origin or null */ viewUrl?: string | null };
   pause: PauseState;
   revoked: RevokedSet;
   personNbf: EpochS;
@@ -274,6 +274,9 @@ export interface StatusReport {
   connectionsSeen?: { con: ConnectionId; lastSeen: IsoTime }[];
   /** v0.1.11: JCS digest() of the `portalKeys` array the bridge trusts after applying `rev`; Core compares it with what it signed (BSD-08 alert) */
   portalKeysDigest?: Sha256Digest;
+  /** v0.1.43 (LA-1, C232, L3): the workspace views service as the bridge last probed it on the private network (`/readyz`);
+   *  omitted when the workspace has none */
+  views?: { url: string; ok: boolean; lastCheckAt: IsoTime };
   apps: {
     ins: InstanceId;
     state: AppState;
