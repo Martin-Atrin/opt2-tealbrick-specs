@@ -1,7 +1,7 @@
 // opt2 credential registry — types + data only (no runtime code). Normative twin of specs/CREDENTIALS.md.
 // v0.1, Lead · Specs, 2026-10-11. Vocabulary (CRUD, effects, hold families, modes, hook phases) comes from ./manifest.ts.
 
-import type { AgentMode, CrudAction, HoldFamily, HookHoldFamily, HookPhase } from "./manifest.ts";
+import type { AgentMode, CrudAction, HoldFamily, HookHoldFamily, HookPhase, ProductId } from "./manifest.ts";
 
 // ── Identifiers (CORE §1) ────────────────────────────────────────────────────
 /** 26-char Crockford base32 ULID, upper case. */
@@ -247,8 +247,12 @@ export interface GrantClaims extends BaseClaims<PortalOrStandaloneIssuer, AgentR
   polrev: number;
 }
 /** Companion grant = same kind, subject is the calling instance; mode bound, wf = declared companion ops (CORE I8),
- *  held = workspace default held families (always incl. money), caps = {} (C16 S5). */
-export type CompanionGrantClaims = GrantClaims & { sub: InstanceRef; mode: "bound" };
+ *  held = workspace default held families (always incl. money), caps = {} (C16 S5).
+ *  v0.1.46 (GRANT-PRD): `prd` = the product of the calling instance (`sub`), signed with the grant by its issuer (Portal
+ *  Core, or a standalone bridge). Readers that predate it ignore it (no closed claim set). The SDK takes Caller.product
+ *  from `prd` first and from slice companionCallers only when `prd` is absent; a `prd` that differs from the slice entry
+ *  for the same instance is refused (`grant_invalid`). Agent grants never carry `prd`. */
+export type CompanionGrantClaims = GrantClaims & { sub: InstanceRef; mode: "bound"; prd?: ProductId };
 export type AgentGrantClaims = GrantClaims & { sub: AgentRef };
 
 // ── K11 person ticket ────────────────────────────────────────────────────────

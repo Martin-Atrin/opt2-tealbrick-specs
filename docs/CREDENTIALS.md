@@ -311,3 +311,6 @@ None. (Key connections without a refresh token: accepted, C15.)
 
 ## v0.1.17 addition (C108, tolerant reader)
 - Grant (K10) `held`: verifiers check only the SHAPE (≤ 32 unique tokens `^[a-z][a-z0-9_]{1,31}$`) and IGNORE families they do not know (`verifyGrant` returns `held` filtered to `KNOWN_HOLD_FAMILIES`); known families still hold, `money` is always held. A newer Core can add a family without breaking older bridges and apps; ignoring is safe because an app cannot declare a family it does not know (manifests that DECLARE an unknown `holdFamily` stay refused, M-OP-4 / schema). Hold verdicts (`hv.f`) stay strict (fail closed).
+
+## v0.1.46 — `prd` in companion grants (GRANT-PRD)
+A companion grant (K10, `sub` = the calling instance) carries `prd` = that instance's product, signed with the grant by its issuer (Portal Core; a standalone bridge the same way). Agent grants never carry it. Readers that predate it ignore it. SDKs set `Caller.product` from `prd` first and from the slice `companionCallers` only when `prd` is absent (grants minted before Core sends it); when both exist for the same instance and differ, the SDK refuses the call `grant_invalid` and logs both values. The bridge keeps its signed config as the source of `HookCallInfo.caller.product` and omits the product when a grant's `prd` disagrees.
