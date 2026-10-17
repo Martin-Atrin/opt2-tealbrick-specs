@@ -249,7 +249,8 @@ export interface GrantClaims extends BaseClaims<PortalOrStandaloneIssuer, AgentR
 /** Companion grant = same kind, subject is the calling instance; mode bound, wf = declared companion ops (CORE I8),
  *  held = workspace default held families (always incl. money), caps = {} (C16 S5).
  *  v0.1.46 (GRANT-PRD): `prd` = the product of the calling instance (`sub`), signed with the grant by its issuer (Portal
- *  Core, or a standalone bridge). Readers that predate it ignore it (no closed claim set). The SDK takes Caller.product
+ *  Core, or a standalone bridge). The grant claim set is CLOSED (manifest jws.ts): verifiers before manifest 0.1.23 refuse
+ *  `prd`, so issuers mint it only for bridge >= 0.2.3 and target SDK >= 0.1.28 (CREDENTIALS v0.1.46). The SDK takes Caller.product
  *  from `prd` first and from slice companionCallers only when `prd` is absent; a `prd` that differs from the slice entry
  *  for the same instance is refused (`grant_invalid`). Agent grants never carry `prd`. */
 export type CompanionGrantClaims = GrantClaims & { sub: InstanceRef; mode: "bound"; prd?: ProductId };
