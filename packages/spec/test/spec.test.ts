@@ -321,5 +321,12 @@ test("v0.1.43 (LA-1, LR-1): viewer route purpose, workflow listing, slice viewUr
   const views: import("../src/bridge.ts").StatusReport["views"] = { url: "https://tb-views-x.up.railway.app", ok: true, lastCheckAt: "2026-10-17T13:00:00Z" };
   const slice: Pick<import("../src/bridge.ts").InstanceSlice, "bridge"> = { bridge: { id: "brg_01M53BAEQSGKVVY4PRM2VE6FBF", keys: [], publicUrl: "https://b.up.railway.app", viewUrl: null } };
   assert.ok(views?.ok && slice.bridge.viewUrl === null);
-  assert.equal(SPEC_VERSION, "0.1.43");
+});
+
+test("v0.1.44 (SDK-CALLER-PRODUCT): app callers carry the verified product id; name stays display only", async () => {
+  const c: import("../src/sdk.ts").Caller = { type: "app", id: "ins_01M53BAEQSGKVVY4PRM2VE6FBF", name: "Observer", mode: null, product: "evil-notes" };
+  const r: import("../src/sdk.ts").Receipt["caller"] = { type: "app", id: c.id as never, name: c.name, product: c.product };
+  assert.notEqual(c.product, c.name.toLowerCase()); // the name may claim anything; product is the identity
+  assert.ok(r.product);
+  assert.equal(SPEC_VERSION, "0.1.44");
 });
