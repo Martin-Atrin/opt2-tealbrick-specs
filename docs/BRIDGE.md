@@ -408,3 +408,6 @@ None open for the bridge after C15/C16 and CORE §14. Settled items recorded for
   | Hook answers, bridge-op answers | – | ≤ 256 KiB | – |
   Apps that carry files in JSON (base64) size them below these limits; a larger file needs a streaming route (OD-2, later).
 
+
+## v0.1.45 — hook caller product (HOOK-CALLER-PRODUCT)
+Hook requests (`before`, `context`, `after`) carry `call.caller.product` for an APP caller: the calling instance's product from the bridge's signed configuration (instance table), never from input or a manifest name. Policy apps (Rules) match "calls from product X" on it; an instance id changes on reinstall. Absent for agents and for an app caller the bridge cannot map — treat that as unverified (fail closed for product-keyed rules).
