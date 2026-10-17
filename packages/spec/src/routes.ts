@@ -12,7 +12,7 @@ import type {
   AgentId, BridgeId, ConnectionId, DeviceClientId, DeviceRequestId, DeviceScope, Ed25519PublicJwk,
   FreeCaps, InstanceId, OwnerSessionClient, PersonId, WorkspaceId,
 } from "./credentials.ts";
-import type { AgentMode, Category, CrudAction, Effect, HoldFamily, KeySource, ProductId, SettingType } from "./manifest.ts";
+import type { AgentMode, Category, Condition, CrudAction, Effect, HoldFamily, KeySource, ProductId, SettingType } from "./manifest.ts";
 
 export type Crud = CrudAction;
 /** I14 shape `{write?, outward?, destructive?: {max, per}}` — owned by ./credentials.ts (FreeCaps). */
@@ -237,7 +237,13 @@ export interface Workspace {
   /** v0.1.15 (C105a) */
   appsPolicy?: AppsPolicy;
   createdAt: IsoTime;
+  /** v0.1.40 (C223): present only while a workspace delete waits for provider removals (the workspace disappears after) */
+  deleting?: { since: IsoTime; lastError: { code: string; message: string } | null };
 }
+/** v0.1.40 (C223): `workspaces.delete` answer (a superset of `Ok`). `deleting` = provider services are still being removed;
+ *  `bridge` = the bridge removal this delete started (null when the workspace had no bridge). A repeat answers the same
+ *  state; after completion `deleted`. */
+export interface WorkspaceDeleteResult { ok: true; state: "deleted" | "deleting"; bridge: RemoveResult | null }
 export type WorkspaceListInput = PageQuery;
 export type WorkspaceList = Page<Workspace>;
 export interface WorkspaceCreateInput { name: string }
@@ -249,15 +255,29 @@ export interface AppsPolicy {
   held: HoldFamily[];
 }
 export interface SetInfrastructureInput { ws: WorkspaceId; provider: ProviderKey; destinationId: string }
-export interface CostEstimateInput { ws: WorkspaceId; products: ProductId[] }
+/** v0.1.40 (F123): `settings` = query key, JSON text `{"<product>": {"<settingKey>": <string | number | boolean>}}` with the deploy
+ *  options the estimate is for (only option values: enum, boolean, integer, number — never free text). Core counts a companion
+ *  service only when its manifest `when` holds for these values. Limits: ≤ 4096 chars, ≤ 32 products, ≤ 64 keys per product
+ *  (`validation_failed` otherwise). Absent = the manifest defaults. */
+export interface CostEstimateInput { ws: WorkspaceId; products: ProductId[]; settings?: string }
+/** v0.1.40: the decoded form of `CostEstimateInput.settings`. */
+export type EstimateSettings = Record<ProductId, Record<string, string | number | boolean>>;
+/** v0.1.40 (C224/C225): where the expected figure comes from: measured use on qa1 for that product version, or a typical
+ *  idle figure (`mixed` at the top level when the lines differ). */
+export type EstimateBasisKind = "measured" | "typical_idle";
 export interface CostEstimate {
   provider: ProviderKey;
   currency: "USD";
+  /** v0.1.40 (C225): equal to `monthlyExpected` when Core sends it (the headline). */
   monthlyLow: number;
+  /** v0.1.40 (C225): "at most": full reserved CPU + memory all month (the small print). */
   monthlyHigh: number;
-  lines: { item: string; monthlyLow: number; monthlyHigh: number }[];
+  lines: { item: string; monthlyLow: number; monthlyHigh: number; monthlyExpected?: number; expectedFrom?: EstimateBasisKind }[];
   basis: string;
   asOf: string;
+  /** v0.1.40 (C225): the EXPECTED monthly cost from measured use per app (headline). Older Core omits it: use `monthlyLow`. */
+  monthlyExpected?: number;
+  expectedFrom?: EstimateBasisKind | "mixed";
 }
 /** ownerKey = public JWK printed by `tealbrick standalone owner-key` (CREDENTIALS §17). */
 export interface StandaloneInput { ws: WorkspaceId; confirmName: string; ownerKey: Ed25519PublicJwk }
@@ -344,8 +364,10 @@ export interface InstructionSet {
   harnessOptionId: string;
   mcpUrl: string | null;
   needsPairingCode: boolean;
-  /** `value` may contain the placeholder {{pairingCode}}; the GUI fills it from agents.pairing_code. */
-  steps: { title: string; detail: string; copy?: { kind: "command" | "json" | "url" | "text"; value: string } }[];
+  /** `value` may contain the placeholder {{pairingCode}}; the GUI fills it from agents.pairing_code.
+   *  v0.1.40 (F122): `pending: true` = the step needs the bridge MCP address and `mcpUrl` is still null: `detail` names the
+   *  address in words and `copy` is omitted; ask again when the bridge is online. Absent = the step is complete. */
+  steps: { title: string; detail: string; copy?: { kind: "command" | "json" | "url" | "text"; value: string }; pending?: true }[];
 }
 /** K2b, shown once; aud = this workspace's bridge. Only for OAuth connectors: path A (pairing.approve) and path B
  *  (paste on the bridge authorize page). CLI and kits always use key connections (S9). */
@@ -522,6 +544,9 @@ export interface KeyRequirement {
   source: KeySource;
   help: string | null;
   step: string | null;
+  /** v0.1.40 (R5-3, Core dcd8eaa): the manifest key's `when` (MANIFEST §9; omitted when absent or empty = the key always
+   *  applies). The GUI counts or asks for a key only when the condition holds for the chosen settings (manifest `conditionHolds`). */
+  when?: Condition;
 }
 export interface DeployStep { id: string; title: string; help: string | null; fields: SettingFieldView[]; keys: KeyRequirement[] }
 export interface OfferSummary {
@@ -763,7 +788,7 @@ export interface Instance {
   companionIssues?: { target: ProductId | "*"; edge: EdgeId | null; state: "blocked" | "not_deployed" | "unlicensed" | "paused" | "disabled"; reason: "companion_op_missing" | "target_not_deployed" | null; detail: string }[];
   provider: ProviderKey | "own_infra";
   settings: Record<string, SettingValue>;
-  lastError: { code: ErrorCode | BridgeManifestRefusalCode; message: string } | null;
+  lastError: InstanceError | null;
   createdAt: IsoTime;
   /** v0.1.13 (C82): consents the release asks for (wildcard companion → `holds_pending_all`) and their state */
   consents?: InstanceConsent[];
@@ -796,17 +821,38 @@ export interface CompanionChange {
   /** true when the update grants more (new ops, new crud, a new target) */
   widens: boolean;
 }
+/** v0.1.40: `Instance.lastError`. `reason` = a finer cause (e.g. `kept_data_in_the_way`, C226); `keptDataId` = the
+ *  `kept_data.list` item in the way (null when it belongs to another account; absent otherwise). */
+export interface InstanceError {
+  code: ErrorCode | BridgeManifestRefusalCode;
+  message: string;
+  reason?: string;
+  keptDataId?: KeptDataId | null;
+}
 export interface InstanceList { items: Instance[] }
 export interface DeployInput { ws: WorkspaceId; product: ProductId; releaseId?: ReleaseId; settings: Record<string, SettingValue> }
 export interface DeployResult { instance: Instance }
-/** B1: the bridge deploys when workspace infrastructure is set (onboarding step 1), not with the first app. */
-export interface BridgeDeployResult { bridge: BridgeStatus }
+/** B1: the bridge deploys when workspace infrastructure is set (onboarding step 1), not with the first app.
+ *  v0.1.40 (F122): `outcome` says what the call did — `started` (a deploy or update began), `in_progress` (one is already
+ *  running), `up_to_date` (no newer bridge release), `unchanged` (nothing to update: own infrastructure or no service yet),
+ *  `revived` (a removed bridge came back on its kept service + volume, C226). Readers that miss it: `bridge.state`. */
+export interface BridgeDeployResult { bridge: BridgeStatus; outcome?: BridgeDeployOutcome }
+export type BridgeDeployOutcome = "started" | "in_progress" | "up_to_date" | "unchanged" | "revived";
 /** S6: settings reach the app only as env at (re)deploy; a settings change redeploys. Never in the slice. */
 export interface InstanceUpdateInput { ws: WorkspaceId; ins: InstanceId; releaseId?: ReleaseId; settings?: Record<string, SettingValue> }
 export interface RollbackInput { ws: WorkspaceId; ins: InstanceId; releaseId?: ReleaseId }
 /** I15: deleteData defaults to false (services stopped, volumes and backups kept). */
 export interface RemoveInput { ws: WorkspaceId; ins: InstanceId; deleteData: boolean }
-export interface RemoveResult { id: InstanceId; state: "removing" | "removed"; dataDeleted: boolean }
+export interface RemoveResult {
+  id: InstanceId | BridgeId;
+  state: "removing" | "removed";
+  dataDeleted: boolean;
+  /** v0.1.40 (C223): what stays in the owner's infrastructure after the removal (the GUI words it; Core never deletes the
+   *  project): nothing, an empty project, or the stopped service with its data (kept data, C226) */
+  leftOnProvider?: "nothing" | "empty_destination" | "stopped_service_and_data";
+  destinationName?: string | null;
+  lastError?: { code: string; message: string } | null;
+}
 /** `register` = instance claim via the bridge, or bridge enrolment for bridge.deploy. */
 export type DeployPhase = "provision" | "image" | "start" | "register" | "health" | "ready";
 /** SSE `data:` payloads; event name = `type`. Heartbeat comment every 15 s; resumable with Last-Event-ID. */
@@ -828,7 +874,40 @@ export interface BridgeStatus {
   lastSeenAt: IsoTime | null;
   ackedRevision: number | null;
   currentRevision: number;
+  /** v0.1.40 (C223, C226): the last deploy/update error of the bridge (null while `removing` or when none) */
+  lastError?: InstanceError | null;
+  /** v0.1.40 (C226): a removed bridge of this workspace whose service + volume are kept on the same destination
+   *  (Deploy revives it); set only when the bridge is absent, failed or cancelled */
+  keptData?: { id: KeptDataId; removedAt: IsoTime } | null;
 }
+
+// kept data (v0.1.40, C226): removed instances whose provider service + volume stay on the owner's infrastructure
+/** The removed instance's id (`ins_…` app, `brg_…` bridge) = the item id. */
+export type KeptDataId = InstanceId | BridgeId;
+export interface KeptDataItem {
+  id: KeptDataId;
+  kind: "app" | "bridge";
+  product: string;
+  /** manifest name, or "Workspace bridge" */
+  name: string;
+  workspace: { id: WorkspaceId; name: string; deleted: boolean };
+  provider: ProviderKey;
+  destination: { id: string; name: string | null };
+  /** main service first, then companions; the main `name` is the confirm text for kept_data.delete */
+  services: { name: string; serviceId: string; volumeIds: string[] }[];
+  keptSince: IsoTime;
+  monthlyCost: { expected: number; high: number; currency: "USD"; basis: string } | null;
+  state: "kept" | "deleting";
+  /** only while `deleting` after a failed try */
+  lastError: { code: string; message: string } | null;
+}
+/** ≤ 200 items, newest removal first; one item per provider service; never another account's item. */
+export interface KeptDataList { items: KeptDataItem[] }
+/** `confirm` = the item's main service name exactly (typed by the owner). 404 `not_found` (absent, other account, own
+ *  infrastructure); 409 `conflict` details.reason `not_kept` | `data_shared` (a live instance uses that service);
+ *  400 `validation_failed` (wrong confirm). A repeat after completion answers `deleted`. */
+export interface KeptDataDeleteInput { id: KeptDataId; confirm: string }
+export interface KeptDataDeleteResult { id: KeptDataId; state: "deleting" | "deleted"; lastError: null }
 
 // keys + tickets (no key value anywhere)
 export interface KeyStatus {
@@ -901,6 +980,9 @@ export interface Order {
   paidAt: IsoTime | null;
   /** v0.1.32 (C196 ENG-2): the business evidence stored with the order; omitted by Core before 0.1.32. */
   business?: OrderBusiness;
+  /** v0.1.40 (C92): discount in minor units (0 = none) and the promotion code used at checkout */
+  amountDiscount?: number;
+  promotionCode?: string | null;
 }
 /** v0.1.32 (C196 ENG-2): Terms §1.2-1.3 evidence. `documents` = what the account had accepted when checkout started
  *  (Core refuses checkout without it: 409 terms_not_accepted). After payment: the business name Stripe collected, whether a
@@ -1078,6 +1160,7 @@ export interface SchemaMap {
   Workspace: Workspace; WorkspaceListInput: WorkspaceListInput; WorkspaceList: WorkspaceList;
   WorkspaceCreateInput: WorkspaceCreateInput; WorkspaceUpdateInput: WorkspaceUpdateInput;
   SetInfrastructureInput: SetInfrastructureInput; CostEstimateInput: CostEstimateInput; CostEstimate: CostEstimate;
+  KeptDataList: KeptDataList; WorkspaceDeleteResult: WorkspaceDeleteResult; KeptDataDeleteInput: KeptDataDeleteInput; KeptDataDeleteResult: KeptDataDeleteResult;
   StandaloneInput: StandaloneInput; StandaloneResult: StandaloneResult; PauseState: PauseState;
   ProviderList: ProviderList; LinkStart: LinkStart; LinkCompleteInput: LinkCompleteInput; LinkTokenInput: LinkTokenInput;
   ProviderLink: ProviderLink; DestinationList: DestinationList; DestinationCreateInput: DestinationCreateInput; Destination: Destination;
@@ -1152,15 +1235,19 @@ export const ROUTES = [
   { opId: "account.set_current_workspace", method: "PUT", path: "/me/current-workspace", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "SetCurrentWorkspaceInput", output: "AccountMe", rate: "write", bodyLog: "meta", audit: "account.set_current_workspace", draftable: false, confirm: false, idempotent: false, registry: "workspace" },
   /** v0.1.32 (C196 ENG-1): the person ticks "I accept … on behalf of my business"; Core records account, document versions, time (no IP). */
   { opId: "account.terms_accept", method: "POST", path: "/me/terms", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "TermsAcceptInput", output: "AccountMe", rate: "write", bodyLog: "meta", audit: "account.terms_accept", draftable: false, confirm: false, idempotent: false, registry: "consent" },
+  /** v0.1.40 (C226): kept data on the owner's infrastructure, account level (only the owning account lists or deletes) */
+  { opId: "kept_data.list", method: "GET", path: "/me/kept-data", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "Empty", output: "KeptDataList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  /** v0.1.40 (C226): typed confirm; deletes the provider service(s) + volume(s) of one kept item; repeat-safe */
+  { opId: "kept_data.delete", method: "POST", path: "/me/kept-data/{id}/delete", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "KeptDataDeleteInput", output: "KeptDataDeleteResult", rate: "write", bodyLog: "meta", audit: "instance.remove", draftable: false, confirm: false, idempotent: false, registry: "provider" },
 
   // workspaces
   { opId: "workspaces.list", method: "GET", path: "/workspaces", auth: BO, exposure: "gateway", transport: "json", query: PAGE, input: "WorkspaceListInput", output: "WorkspaceList", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
   { opId: "workspaces.create", method: "POST", path: "/workspaces", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceCreateInput", output: "Workspace", rate: "write", bodyLog: "meta", audit: "workspace.create", draftable: true, confirm: false, idempotent: true, registry: "workspace" },
   { opId: "workspaces.get", method: "GET", path: "/workspaces/{ws}", auth: BO, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "Workspace", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "workspace" },
   { opId: "workspaces.update", method: "PATCH", path: "/workspaces/{ws}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceUpdateInput", output: "Workspace", rate: "write", bodyLog: "meta", audit: "workspace.update", draftable: true, confirm: false, idempotent: false, registry: "workspace" },
-  { opId: "workspaces.delete", method: "DELETE", path: "/workspaces/{ws}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "Ok", rate: "write", bodyLog: "meta", audit: "workspace.delete", draftable: false, confirm: false, idempotent: false, registry: "workspace" },
+  { opId: "workspaces.delete", method: "DELETE", path: "/workspaces/{ws}", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "WorkspaceDeleteResult", rate: "write", bodyLog: "meta", audit: "workspace.delete", draftable: false, confirm: false, idempotent: false, registry: "workspace" },
   { opId: "workspaces.set_infrastructure", method: "PUT", path: "/workspaces/{ws}/infrastructure", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "SetInfrastructureInput", output: "Workspace", rate: "write", bodyLog: "meta", audit: "workspace.set_infrastructure", draftable: true, confirm: true, idempotent: false, registry: "workspace" },
-  { opId: "workspaces.cost_estimate", method: "GET", path: "/workspaces/{ws}/cost-estimate", auth: BO, exposure: "gateway", transport: "json", query: ["products"], input: "CostEstimateInput", output: "CostEstimate", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "provider" },
+  { opId: "workspaces.cost_estimate", method: "GET", path: "/workspaces/{ws}/cost-estimate", auth: BO, exposure: "gateway", transport: "json", query: ["products", "settings"], input: "CostEstimateInput", output: "CostEstimate", rate: "read", bodyLog: "meta", audit: null, draftable: false, confirm: false, idempotent: false, registry: "provider" },
   { opId: "workspaces.pause", method: "POST", path: "/workspaces/{ws}/pause", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "PauseState", rate: "write", bodyLog: "meta", audit: "workspace.pause", draftable: false, confirm: false, idempotent: false, registry: "agent_policy" },
   { opId: "workspaces.resume", method: "POST", path: "/workspaces/{ws}/resume", auth: B, exposure: "gateway", transport: "json", query: NOQ, input: "WorkspaceRef", output: "PauseState", rate: "write", bodyLog: "meta", audit: "workspace.resume", draftable: false, confirm: false, idempotent: false, registry: "agent_policy" },
   { opId: "workspaces.standalone", method: "POST", path: "/workspaces/{ws}/standalone", auth: B, exposure: "gateway", transport: "json_slow", query: NOQ, input: "StandaloneInput", output: "StandaloneResult", rate: "sensitive", bodyLog: "meta", audit: "workspace.standalone", draftable: false, confirm: false, idempotent: false, registry: "instance" },

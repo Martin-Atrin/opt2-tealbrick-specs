@@ -292,6 +292,10 @@ export interface StatusReport {
     schemaVersion?: SchemaVersion;
     minCompatibleCode?: SemVer | null;
     failure?: BootFailure;
+    /** v0.1.40 (C219, bridge 0.1.31): AppStatus.preUpdateSnapshot with exactly the five ref members (`file` safe name, `sha256`,
+     *  `createdAt`, `from`, `to`); extra members of the app's ref are dropped, a malformed ref is omitted, `null` stays `null`
+     *  (BRIDGE §10.3). Core shows it on the update record next to `lastUpdate.dataRestoredTo`. */
+    preUpdateSnapshot?: PreUpdateSnapshotRef | null;
   }[];
   /** presence booleans only — never values */
   keys: { name: string; ins: InstanceId; set: boolean }[];

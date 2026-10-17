@@ -223,5 +223,40 @@ test("v0.1.39 (C213 US-1..4): upgrade-safety fields are optional and additive; f
   const last: import("../src/routes.ts").InstanceLastUpdate = { outcome: "rolled_back", from: "1.0.0", to: "2.0.0", at: "2026-10-16T14:48:06.000Z", dataRestoredTo: "2026-10-16T14:45:37.000Z" };
   const code: import("../src/routes.ts").ErrorCode = "update_rolled_back";
   assert.ok(last.outcome === "rolled_back" && code);
-  assert.equal(SPEC_VERSION, "0.1.39");
+});
+
+test("v0.1.40 (Core-local fields typed): estimate settings + expected, key when, pending step, bridge outcome, kept data, preUpdateSnapshot pass-through", async () => {
+  const routes = await import("../src/routes.ts");
+  const row = (id: string) => routes.ROUTES.find((r) => r.opId === id);
+  assert.deepEqual([...(row("workspaces.cost_estimate")?.query ?? [])], ["products", "settings"]);
+  const list = row("kept_data.list");
+  const del = row("kept_data.delete");
+  assert.ok(list && del);
+  assert.equal(list.method, "GET");
+  assert.equal(list.path, "/me/kept-data");
+  assert.equal(list.output, "KeptDataList");
+  assert.deepEqual([...list.auth], ["browser", "owner-cli"]);
+  assert.equal(del.method, "POST");
+  assert.equal(del.path, "/me/kept-data/{id}/delete");
+  assert.deepEqual([...del.auth], ["browser"]); // RT1: the owner CLI never deletes
+  assert.equal(del.input, "KeptDataDeleteInput");
+  assert.equal(row("workspaces.delete")?.output, "WorkspaceDeleteResult");
+  // old answers stay valid (every new member is optional) and new ones carry the members
+  const est: import("../src/routes.ts").CostEstimate = {
+    provider: "railway", currency: "USD", monthlyLow: 1.2, monthlyHigh: 40, basis: "b", asOf: "2026-10-17T00:00:00Z",
+    lines: [{ item: "knowledge", monthlyLow: 1.2, monthlyHigh: 40, monthlyExpected: 1.2, expectedFrom: "measured" }],
+    monthlyExpected: 1.2, expectedFrom: "measured",
+  };
+  const key: import("../src/routes.ts").KeyRequirement = { name: "OPENAI", label: "OpenAI", provider: "openai", required: true, source: "app_own", help: null, step: null, when: { engine: ["hindsight", "gbrain"] } };
+  const step: import("../src/routes.ts").InstructionSet["steps"][number] = { title: "Connect", detail: "the MCP address (shown when your workspace bridge is online)", pending: true };
+  const deployed: import("../src/routes.ts").BridgeDeployResult = { bridge: { id: null, state: "absent", version: null, mcpUrl: null, lastSeenAt: null, ackedRevision: null, currentRevision: 0, keptData: { id: "brg_01M53BAEQSGKVVY4PRM2VE6FBF", removedAt: "2026-10-17T00:00:00Z" } }, outcome: "revived" };
+  const kept: import("../src/routes.ts").KeptDataItem = {
+    id: "ins_01M53BAEQSGKVVY4PRM2VE6FBF", kind: "app", product: "connect", name: "Connect", workspace: { id: "ws_01M53BAEQSGKVVY4PRM2VE6FBF", name: "A", deleted: true },
+    provider: "railway", destination: { id: "p", name: null }, services: [{ name: "tb-connect", serviceId: "s", volumeIds: ["v"] }], keptSince: "2026-10-17T00:00:00Z",
+    monthlyCost: null, state: "kept", lastError: null,
+  };
+  const err: import("../src/routes.ts").InstanceError = { code: "destination_in_use", message: "m", reason: "kept_data_in_the_way", keptDataId: kept.id };
+  const report: import("../src/bridge.ts").StatusReport["apps"][number]["preUpdateSnapshot"] = { file: "tb-preupdate-to-0.2.0.tar.gz", sha256: "a".repeat(64), createdAt: "2026-10-17T00:00:00Z", from: "0.1.0", to: "0.2.0" };
+  assert.ok(est.monthlyExpected && key.when && step.pending && deployed.outcome && err.keptDataId && report);
+  assert.equal(SPEC_VERSION, "0.1.40");
 });
