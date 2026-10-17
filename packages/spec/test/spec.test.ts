@@ -277,5 +277,30 @@ test("v0.1.41 (G3 R1, F126): draft loosening list, confirmLoosening, device-crea
   const op = { ...ex.operations.find((o: { effect: string }) => o.effect === "write"), id: "page_share", effect: "outward", holdFamily: "public_link", receipt: true };
   assert.equal(validate({ ...ex, operations: [...ex.operations, op] }), true, JSON.stringify(validate.errors));
   assert.equal(validate({ ...ex, operations: [...ex.operations, { ...op, holdFamily: "public_links" }] }), false);
-  assert.equal(SPEC_VERSION, "0.1.41");
+});
+
+test("v0.1.42 (C230, owners' review): shared app-to-app contracts — schema + fixture per CONTRACT_ID; valid pass, invalid fail (L34)", async () => {
+  const { CONTRACT_IDS } = await import("../src/manifest.ts");
+  const ajv = new Ajv2020({ strict: false, allErrors: true });
+  for (const id of CONTRACT_IDS) {
+    const base = id.replace("/", ".");
+    const schema = JSON.parse(readFileSync(new URL(`../schemas/contracts/${base}.schema.json`, import.meta.url), "utf8"));
+    assert.equal(schema.$id, `https://schemas.tealbrick.com/opt2/contracts/${id}.schema.json`);
+    const validate = ajv.compile(schema);
+    const fx = JSON.parse(readFileSync(new URL(`../examples/contracts/${base}.json`, import.meta.url), "utf8")) as {
+      valid: unknown[];
+      invalid: { why: string; doc: unknown }[];
+      invalidByNormalizeHandle?: { why: string; doc: unknown }[];
+    };
+    assert.ok(fx.valid.length > 0 && fx.invalid.length > 0, id);
+    for (const doc of fx.valid) assert.equal(validate(doc), true, `${id}: ${JSON.stringify(validate.errors)}`);
+    for (const bad of fx.invalid) assert.equal(validate(bad.doc), false, `${id} should refuse: ${bad.why}`);
+    // the JSON pattern cannot check a bech32 checksum: these pass the schema and MUST be refused by normalizeHandle (conformance)
+    for (const bad of fx.invalidByNormalizeHandle ?? []) assert.equal(validate(bad.doc), true, `${id}: ${bad.why}`);
+  }
+  const validate = ajv.compile(load("manifest.schema.json"));
+  const ex = JSON.parse(readFileSync(new URL("../examples/notes.manifest.json", import.meta.url), "utf8"));
+  assert.equal(validate({ ...ex, contracts: { produces: ["messages/1"], consumes: ["fleet.directory_feed/1"] } }), true, JSON.stringify(validate.errors));
+  assert.equal(validate({ ...ex, contracts: { produces: ["messages/2"] } }), false);
+  assert.equal(SPEC_VERSION, "0.1.42");
 });

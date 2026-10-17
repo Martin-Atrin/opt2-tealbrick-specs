@@ -41,6 +41,9 @@ export const HARNESS_KINDS = ["generic", "claude_desktop", "codex_desktop", "tbd
 export const STANDARD_OPERATIONS = ["tb.hold_status", "tb.holds_list", "tb.holds_decide", "tb.receipts_list", "tb.agents_list", "tb.scopes_set", "tb.keys_status", "tb.key_set", "tb.key_delete", "tb.export", "tb.holds_pending"] as const;
 /** v0.1.13 (G4): the ONE op a wildcard companion (`product: "*"`) may name (MANIFEST M-CP-3); needs owner consent at deploy (C82). */
 export const WILDCARD_COMPANION_OPS = ["tb.holds_pending"] as const;
+/** v0.1.42 (C230): shared app-to-app contracts, `<name>/<major>`; each has a JSON Schema in this package at
+ *  `schemas/contracts/<name>.<major>.schema.json` and a fixture at `examples/contracts/<name>.<major>.json`. */
+export const CONTRACT_IDS = ["messages/1", "fleet.directory_feed/1"] as const;
 
 
 export type CrudAction = (typeof CRUD_ACTIONS)[number];
@@ -60,6 +63,7 @@ export type PublicRoutePurpose = (typeof PUBLIC_ROUTE_PURPOSES)[number];
 export type Category = (typeof CATEGORIES)[number];
 export type HarnessKind = (typeof HARNESS_KINDS)[number];
 export type StandardOperationId = (typeof STANDARD_OPERATIONS)[number];
+export type ContractId = (typeof CONTRACT_IDS)[number];
 
 // ---------- Primitive aliases (patterns in the schema) ----------
 
@@ -113,6 +117,9 @@ export interface Manifest {
   artifacts?: Artifact[];
   publicRoutes?: PublicRoute[];
   ui?: Ui;
+  /** v0.1.42 (C230): the shared app-to-app contracts this app writes (`produces`) and reads (`consumes`). A manifest with this
+   *  field needs a validator from manifest 0.1.20 on: the release must state `requires.bridge` of a bridge that pins it. */
+  contracts?: { produces?: ContractId[]; consumes?: ContractId[] };
 }
 
 export interface Discovery {
